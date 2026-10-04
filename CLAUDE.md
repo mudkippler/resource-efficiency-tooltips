@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`. It also has a `/ret` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (mudkippler).
+A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`. It also has a `/ret` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
 
 ## Repo layout and packaging rule
 
