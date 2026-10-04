@@ -35,6 +35,7 @@ Eviscerate                    Rank 1
 
 - `/ret` opens or closes the spellbook report.
 - `/ret debug` prints the parsed text of the last spell you hovered. This helps if you want to report a spell whose number looks wrong.
+- `/ret help` lists the commands.
 
 ## Limitations
 

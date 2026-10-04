@@ -2,7 +2,7 @@
 -- Appends damage / healing / absorb per point of mana, rage or energy to the cost line of spell tooltips.
 -- Amounts are read from the tooltip's own description text, so they match the rank being shown.
 
-local _, ns = ...
+local addonName, ns = ...
 
 local format = string.format
 local issecret = issecretvalue or function() return false end
@@ -557,21 +557,42 @@ ns.FormatRatio = FormatRatio
 ns.ORDER, ns.LABELS, ns.COLORS, ns.RESOURCES = ORDER, LABELS, COLORS, RESOURCES
 ns.supported = SUPPORTED_LOCALES[GetLocale()] or false
 
+local PREFIX = "|cff80c8ffResource Efficiency Tooltips|r"
+
 -- /ret: opens the spellbook efficiency report.
+-- /ret help: lists the commands.
 -- /ret debug: prints the text of the last annotated spell tooltip, for debugging the parser.
 SLASH_RESOURCEEFFICIENCYTOOLTIPS1 = "/ret"
 SlashCmdList.RESOURCEEFFICIENCYTOOLTIPS = function(msg)
-    if (msg or ""):lower():match("^%s*(%S*)") ~= "debug" then
+    local command = (msg or ""):lower():match("^%s*(%S*)")
+    if command == "help" then
+        print(PREFIX .. " commands:")
+        print("  /ret - open or close the spellbook efficiency report")
+        print("  /ret debug - print the parsed text of the last spell you hovered")
+        print("  /ret help - show this list")
+        return
+    end
+    if command ~= "debug" then
         ns.ToggleReport()
         return
     end
     local last = ns.lastSpell
     if not last then
-        print("|cff80c8ffResource Efficiency Tooltips:|r hover a spell with a mana, rage or energy cost first.")
+        print(PREFIX .. ": hover a spell with a mana, rage or energy cost first.")
         return
     end
-    print(format("|cff80c8ffResource Efficiency Tooltips:|r %s (%s)", tostring(last.name), tostring(last.id)))
+    print(format("%s: %s (%s)", PREFIX, tostring(last.name), tostring(last.id)))
     for i, line in ipairs(last.lines) do
         print(format("  %d: %s", i, line))
     end
 end
+
+-- Startup line with the version from the .toc.
+local GetMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+local loginFrame = CreateFrame("Frame")
+loginFrame:RegisterEvent("PLAYER_LOGIN")
+loginFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    local version = GetMetadata and GetMetadata(addonName, "Version")
+    print(format("%s%s loaded. Type /ret help for commands.", PREFIX, version and (" v" .. version) or ""))
+end)
