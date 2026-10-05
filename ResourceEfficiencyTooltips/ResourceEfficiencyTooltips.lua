@@ -688,6 +688,24 @@ local function Process(tooltip, spellID)
     end
 end
 
+-- For an action slot holding a macro, returns true and the spell its #showtooltip shows (nil if
+-- unknown). Depending on the API Forever has (unconfirmed), GetActionInfo gives that spell directly
+-- ("macro", spellID, "spell") or it comes from GetMacroSpell (spell ID, or name, rank, spellID).
+local function GetMacroAction(slot)
+    if not GetActionInfo then return false end
+    local ok, isMacro, spellID = pcall(function()
+        local actionType, id, subType = GetActionInfo(slot)
+        if actionType ~= "macro" then return false end
+        if subType == "spell" then return true, id end
+        if GetMacroSpell and id then
+            local first, _, third = GetMacroSpell(id)
+            return true, (type(first) == "number" and first) or (type(third) == "number" and third) or nil
+        end
+        return true, nil
+    end)
+    return ok and isMacro, spellID
+end
+
 if not SUPPORTED_LOCALES[GetLocale()] then
     -- Leave tooltips alone rather than show wrong numbers.
 elseif TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
@@ -698,6 +716,15 @@ else
     GameTooltip:HookScript("OnTooltipSetSpell", function(self)
         local _, spellID = self:GetSpell()
         Process(self, spellID)
+    end)
+end
+
+-- Macros with #showtooltip show the spell's tooltip, but through SetAction, which neither hook
+-- above is guaranteed to see. Processing twice is harmless: IsAnnotated stops the second pass.
+if SUPPORTED_LOCALES[GetLocale()] and hooksecurefunc and GameTooltip.SetAction then
+    hooksecurefunc(GameTooltip, "SetAction", function(self, slot)
+        local isMacro, spellID = GetMacroAction(slot)
+        if isMacro then Process(self, spellID) end
     end)
 end
 

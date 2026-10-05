@@ -12,6 +12,8 @@
 
 **Choose what you see.** Type `/ret config` to turn the efficiency or the DPS part of the tooltip on or off.
 
+**Works on macros.** Macros that use `#showtooltip` show the same numbers as the spell itself.
+
 **Always matches the rank you're looking at.** Numbers come from the tooltip's own text, so every rank gives its own figure.
 
 **Spellbook report.** Type `/ret report` to open a window listing every spell and rank in your spellbook that has a calculable efficiency, best first. Click a column header to sort by damage, healing or absorb, and hover a row to see the spell's tooltip.
