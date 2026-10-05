@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`. It also has a `/ret` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
+A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, and **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`. `/ret config` toggles each part. It also has a `/ret` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
 
 ## Repo layout and packaging rule
 
@@ -10,6 +10,7 @@ ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zi
     ResourceEfficiencyTooltips.toc
     ResourceEfficiencyTooltips.lua            <- parser, tooltip hook, slash commands, startup line
     Report.lua                                <- /ret spellbook report window
+    Config.lua                                <- /ret config settings window (two checkboxes)
     icon.tga                                  <- addon-list icon (64x64, 32-bit TGA with alpha)
 ```
 
@@ -31,7 +32,7 @@ ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zi
 The pipeline, top to bottom in the file:
 
 1. **Hook.** `TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, …)` on modern clients, falling back to `GameTooltip:HookScript("OnTooltipSetSpell")`. Only tooltips named in `TOOLTIPS` (GameTooltip, ItemRefTooltip) are annotated. Other addons' hidden scanning tooltips must never be modified.
-2. **`ReadSpellTooltip(tooltip)`** walks `<Name>TextLeftN`. Within the first 5 lines it finds the cost line with `MatchCost` (mana, rage or energy from `RESOURCES`, built from the client's `MANA_COST`/`RAGE_COST`/`ENERGY_COST` globals). Every other line is `Normalize`d (colour codes and links stripped, thousands separators removed, lowercased). It stops at "Next rank", and bails if `IsAnnotated` finds our suffix already there.
+2. **`ReadSpellTooltip(tooltip)`** walks `<Name>TextLeftN`. Within the first 5 lines it finds the cost line with `MatchCost`, the cast line with `MatchCast` ("1.5 sec cast", "instant", "channeled", "next melee"; anchored so "instantly…" doesn't match) and the cooldown with `MatchCooldown`, usually on `TextRightN` (mana, rage or energy from `RESOURCES`, built from the client's `MANA_COST`/`RAGE_COST`/`ENERGY_COST` globals). Every other line is `Normalize`d (colour codes and links stripped, thousands separators removed, lowercased). It stops at "Next rank", and bails if `IsAnnotated` finds our suffix already there.
 3. **Cost.** A percentage cost ("12% of base mana") falls back to `GetCostFromAPI` (`C_Spell.GetSpellPowerCost` or `GetSpellPowerCost`).
 4. **`Analyze(lines, spellName, stats)`** is the heart of the parser. It returns per-kind totals plus flags:
    - Splits multi-line descriptions on `\n`, then `KeepMaxComboPoints` keeps only the highest "N points:" line of a finisher table.
@@ -42,7 +43,12 @@ The pipeline, top to bottom in the file:
      - classified by `ClauseKind`: `false` means not throughput and resets the inherited kind; `nil` means inherit the previous clause's kind. Then `FindAmount` takes the first real number (skipping `UNIT_WORDS` like yards, sec, %, combo points, and "by N" modifiers; averaging "X to Y" and "X-Y"), and `TickMultiplier` turns per-tick amounts into totals.
    - A sentence matching `AOE_PATTERNS` marks its amounts as *per target*.
 5. **`ComputeRatios`** gives total ÷ cost per kind. For absorbs, `ParseAbsorbDrain` adds Mana Shield's drain to the cost.
-6. **`GetSuffix`** builds the coloured suffix and caches it in a 200-entry FIFO, keyed on cost, resource, name, combat stats and lines. Action-button tooltips refresh several times a second, so the cache matters.
+6. **`ComputeDPS`** is damage ÷ max(cast time, GCD). The GCD is 1 sec for energy and 1.5 sec otherwise. It returns nil when there's a cooldown (tooltip text, or `GetSpellBaseCooldown` as a backstop in `Process`), for next-swing abilities and for finishers. Normal casts use `Analyze`'s `direct` totals (no over-time clauses, charges or summons). Channels use the full total over `duration`.
+7. **`GetSuffix` / `GetDPSSuffix`** build the coloured suffixes and cache them through `Cached` in a 200-entry FIFO, keyed on cost or cast info, resource, name, combat stats and lines. Action-button tooltips refresh several times a second, so the cache matters. `Process` applies each suffix only if its `ns.db` setting is on.
+
+`Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `absorbDrain`, `comboPoints`, `duration`).
+
+**Settings** live in `ns.db`: the defaults until `ADDON_LOADED`, then the saved variable `ResourceEfficiencyTooltipsDB` (`efficiency`, `dps`, both default true).
 
 `Report.lua` reuses the same code via `ns`: `ns.ReadSpellTooltip`, `ns.ComputeRatios`, `ns.GetCostFromAPI`, `ns.Normalize`, `ns.FormatRatio`, `ns.ORDER/LABELS/COLORS/RESOURCES` and `ns.supported`. It scans spells with its own hidden tooltip, `ResourceEfficiencyTooltipsScanner`, which the hook ignores because it isn't in `TOOLTIPS`. It enumerates the spellbook with `C_SpellBook` when available, otherwise the legacy `GetNumSpellTabs`/`GetSpellBookItemInfo` APIs. Both paths are guarded, because it isn't known which one this client has.
 
@@ -54,6 +60,7 @@ The pipeline, top to bottom in the file:
 - **Finishers are rated at max combo points** and labelled "at 5 CP" in tooltips, "5cp" in the report.
 - **Conversions are ignored** (`CONVERSION_PATTERNS`): Mana Burn's per-mana damage and Execute's per-extra-rage damage.
 - **"Stacks up to N times" is not charges.** This was the Arcane Blast bug.
+- **DPS only for spells cast back to back:** no cooldown, not next-swing, not a finisher. Instants use the GCD. Damage over time is excluded for normal casts, because recasting doesn't stack it, so DoT-only spells show no DPS. Channels count everything over the channel. AoE is per target. DPS doesn't model resource limits or auto attacks.
 - **Per-tick / per-target labels** appear when a duration can't be found, or the effect hits several targets.
 - **English only.** `SUPPORTED_LOCALES` is enUS and enGB. Other locales leave tooltips untouched rather than show wrong numbers, and the report refuses to open.
 - **Don't guess.** When something can't be calculated honestly, show nothing rather than a misleading number.
@@ -115,12 +122,28 @@ Regression cases that passed (cost → expected damage per point, with 100 avera
 | Rupture (5 points: 136 damage over 16 secs) | 25 energy | 136/25, 5 CP | finisher damage over time |
 | Kidney Shot, Mana Burn | — | nothing | no false positives |
 
+DPS cases (`ns.ComputeDPS(lines, { kind, seconds, cooldown }, name, nil, resource)`):
+
+| Spell | Cast | Expected | Covers |
+|---|---|---|---|
+| Frostbolt (18 to 20) | 1.5 sec | 12.67 | basic |
+| Fireball (16 to 25 + 2 over 4 sec) | 1.5 sec | 13.67 | DoT part excluded |
+| Smite (15 to 20) | 1.0 sec | 11.67 | GCD floor |
+| Arcane Explosion (32 to 36, all enemies) | instant, mana | 22.67 per target | instant uses 1.5 GCD |
+| Sinister Strike | instant, energy | 103 | 1 sec energy GCD |
+| Arcane Missiles (24 each second for 3 sec) | channeled | 24 | channel |
+| Blizzard (200 over 8 sec) | channeled | 25 per target | channel AoE |
+| Corruption, Lightning Shield, Searing Totem | instant | nothing | DoT / charges / summon |
+| Mortal Strike (6 sec cooldown), Heroic Strike (next melee), Eviscerate | — | nothing | not repeatable |
+
 ## Known gaps
 
 - Multi-Shot style wording ("hitting 3 targets for an additional N damage") isn't handled.
 - Whirlwind and other dual-wield strikes only use main-hand damage.
 - The Classic finisher table format and some tooltip texts above were written from memory. Real in-game text may differ, so confirm with `/ret debug` output.
 - Whether lower ranks appear in the report depends on the client's spellbook "show all ranks" behaviour.
+- The report doesn't show DPS. Free spells only get DPS if their tooltip has a cast line, and percentage costs without the API only lose the efficiency part.
+- The exact Forever cast and cooldown line wording ("Instant", "Channeled", "N sec cooldown") is assumed from Classic. Check `/ret debug`, which prints the parsed cast info.
 - Mana, rage and energy share one sorted list in the report even though their points aren't comparable. This is accepted and documented in `DESCRIPTION.md`.
 
 ## Conventions
@@ -129,4 +152,4 @@ Regression cases that passed (cost → expected damage per point, with 100 avera
 - Guard every client API that may not exist on this client (`C_Spell`, `C_SpellBook`, `C_AddOns`, `TooltipDataProcessor`, `Enum.*`), falling back to the legacy global.
 - Treat tooltip text as possibly secret (`issecretvalue`), as `ReadSpellTooltip` and `Process` do.
 - Chat messages start with the coloured addon name (`|cff80c8ffResource Efficiency Tooltips|r`).
-- Slash commands: `/ret` (report), `/ret debug`, `/ret help`. A new command must also be added to the `help` output and to `DESCRIPTION.md`.
+- Slash commands: `/ret` (report), `/ret config`, `/ret debug`, `/ret help`. A new command must also be added to the `help` output and to `DESCRIPTION.md`.

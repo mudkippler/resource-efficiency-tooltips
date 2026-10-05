@@ -1,10 +1,11 @@
 # Resource Efficiency Tooltips
 
-**How much does each point of mana, rage or energy actually buy you?** This addon adds the answer to the cost line of spell and ability tooltips. You can compare ranks and abilities at a glance without doing the maths yourself.
+**How much does each point of mana, rage or energy actually buy you?** This addon adds the answer to the cost line of spell and ability tooltips, and the damage per second to the cast time line. You can compare ranks and abilities at a glance without doing the maths yourself.
 
 ```
 Frostbolt                     Rank 1
 25 Mana  (0.76 dmg/mana)
+1.5 sec cast  (12.7 dps)
 
 Heroic Strike                 Rank 9
 15 Rage  (10.5 dmg/rage)
@@ -16,6 +17,8 @@ Eviscerate                    Rank 1
 ## Features
 
 - **Damage, healing and absorb per point of resource** for mana, rage and energy. Each is colour-coded: orange for damage, green for healing and blue for absorbs.
+- **Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Damage over time is left out because recasting doesn't stack it, so spells that are only damage over time (Corruption) show no DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS *per target*.
+- **Choose what you see.** Type `/ret config` to turn the efficiency or the DPS part of the tooltip on or off.
 - **Always matches the rank you're looking at.** Numbers come from the tooltip's own text, so every rank gives its own figure.
 - **Spellbook report.** Type `/ret` to open a window listing every spell and rank in your spellbook that has a calculable efficiency, best first. Click a column header to sort by damage, healing or absorb, and hover a row to see the spell's tooltip.
 - **Understands how abilities actually work:**
@@ -29,11 +32,12 @@ Eviscerate                    Rank 1
   - Finishers (Eviscerate, Rupture…) are rated at 5 combo points
 - **Clear labels for special cases.** AoE abilities are marked *per target*, and effects with no fixed duration are marked *per tick*.
 - **Doesn't guess.** Weapon imbues, Paladin seals, buffs that only change other damage or healing, and bonus damage from spare rage or energy are skipped, so you won't see misleading numbers.
-- **Lightweight.** No configuration and no saved variables.
+- **Lightweight.** Two settings, saved per account, and nothing else.
 
 ## Commands
 
 - `/ret` opens or closes the spellbook report.
+- `/ret config` opens the settings window, where you can turn the efficiency and DPS parts of the tooltip on or off.
 - `/ret debug` prints the parsed text of the last spell you hovered. This helps if you want to report a spell whose number looks wrong.
 - `/ret help` lists the commands.
 
@@ -41,5 +45,6 @@ Eviscerate                    Rank 1
 
 - **English clients only (enUS / enGB).** On other locales the addon turns itself off instead of showing wrong numbers.
 - Values come from tooltip text. Talents, gear and buffs only count if the tooltip already includes them. The exception is weapon-based abilities, which use your current weapon damage and attack power.
+- DPS is the damage of casting a spell back to back. It doesn't account for running out of mana, rage or energy, or for your auto attacks.
 - Mana, rage and energy share one list in the report, but a point of one isn't worth the same as a point of another. Compare within a resource for the fairest picture.
 - Spell descriptions vary a lot. If a spell shows a strange number (or none), please open an issue and include the `/ret debug` output.

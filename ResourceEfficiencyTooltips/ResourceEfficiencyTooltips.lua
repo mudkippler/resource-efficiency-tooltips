@@ -1,5 +1,6 @@
 -- Resource Efficiency Tooltips
--- Appends damage / healing / absorb per point of mana, rage or energy to the cost line of spell tooltips.
+-- Appends damage / healing / absorb per point of mana, rage or energy to the cost line of spell tooltips,
+-- and damage per second to the cast time line of spells that can be cast back to back.
 -- Amounts are read from the tooltip's own description text, so they match the rank being shown.
 
 local addonName, ns = ...
@@ -348,12 +349,25 @@ local function KeepMaxComboPoints(lines)
     return kept, maxPoints
 end
 
+-- True if a clause's amount arrives over time rather than on impact: "39 damage over 9 sec",
+-- "26 damage every 1 sec", "repeatedly attacks".
+local function IsOverTime(clause)
+    return clause:find("over%s+%d") or clause:find("every") or clause:find("each%s+sec")
+        or clause:find("per%s+sec") or clause:find("repeatedly")
+end
+
 -- lines: normalized (lowercase) tooltip lines; spellName: lowercase spell name, if known;
 -- stats: GetCombatStats() for weapon-based abilities.
--- Returns totals[kind], perTick[kind], aoe[kind], absorbDrain (mana per point absorbed, or nil),
--- comboPoints (the combo points a finisher was rated at, or nil).
+-- Returns a table with:
+--   totals[kind], perTick[kind], aoe[kind]: everything one cast does;
+--   direct[kind], directAoe[kind]: only what lands on impact (no over-time effects, charges or
+--     summons), used for DPS;
+--   absorbDrain: mana per point absorbed, or nil;
+--   comboPoints: the combo points a finisher was rated at, or nil;
+--   duration: seconds from "over N sec", "for N sec" or "lasts N sec" (a channel's length), or nil.
 local function Analyze(lines, spellName, stats)
-    local totals, perTick, aoe = {}, {}, {}
+    local totals, perTick, aoe, direct, directAoe = {}, {}, {}, {}, {}
+    local result = { totals = totals, perTick = perTick, aoe = aoe, direct = direct, directAoe = directAoe }
     stats = stats or {}
     -- Descriptions can span several lines in one font string.
     local split = {}
@@ -368,9 +382,12 @@ local function Analyze(lines, spellName, stats)
     -- Weapon imbues (Flametongue, Frostbrand, Windfury...) and Paladin seals scale with
     -- weapon hits, not casts.
     if fullText:find("imbue") or fullText:find("only one seal") or fullText:find("each melee attack") then
-        return totals, perTick, aoe, nil
+        return result
     end
     local lasts = ParseDuration(fullText, "lasts")
+    result.comboPoints = comboPoints
+    result.absorbDrain = ParseAbsorbDrain(fullText)
+    result.duration = ParseDuration(fullText, "over") or ParseDuration(fullText, "for") or lasts
     local charges = ParseCharges(fullText)
     local shotInterval = spellName and SHOT_INTERVALS[spellName]
     local isNextSwingSpell = spellName and NEXT_SWING_SPELLS[spellName]
@@ -380,10 +397,14 @@ local function Analyze(lines, spellName, stats)
             local kind
             local sentenceIsAoE = IsAoE(sentence)
             local clauses = sentence:gsub("%s+and%s+", "\2"):gsub(";", "\2")
-            local function add(value, mult, tick)
+            local function add(value, mult, tick, overTime)
                 totals[kind] = (totals[kind] or 0) + value * mult * charges
                 perTick[kind] = perTick[kind] or tick
                 aoe[kind] = aoe[kind] or sentenceIsAoE
+                if not (overTime or tick or mult > 1 or charges > 1) then
+                    direct[kind] = (direct[kind] or 0) + value
+                    directAoe[kind] = directAoe[kind] or sentenceIsAoE
+                end
             end
             for clause in clauses:gmatch("[^\2]+") do
                 -- Checked before ClauseKind, which would reject Heroic Strike's "increases melee damage".
@@ -392,7 +413,7 @@ local function Analyze(lines, spellName, stats)
                 if isWeaponStrike and not IsConversion(clause) then
                     kind = "damage"
                     if weaponDamage and weaponDamage > 0 then
-                        add(weaponDamage, 1, false)
+                        add(weaponDamage, 1, false, false)
                     end
                 elseif clauseKind == false then
                     kind = nil
@@ -401,14 +422,15 @@ local function Analyze(lines, spellName, stats)
                     if kind then
                         local value, rest = FindAmount(clause)
                         if value and value > 0 then
-                            add(value, TickMultiplier(clause, rest, lasts, shotInterval))
+                            local mult, tick = TickMultiplier(clause, rest, lasts, shotInterval)
+                            add(value, mult, tick, IsOverTime(clause))
                         end
                     end
                 end
             end
         end
     end
-    return totals, perTick, aoe, ParseAbsorbDrain(fullText), comboPoints
+    return result
 end
 
 ---------------------------------------------------------------------------
@@ -420,29 +442,70 @@ local function FormatRatio(ratio)
     return format("%.2f", ratio)
 end
 
--- Action button tooltips refresh several times a second; cache the suffix per tooltip text.
+-- Action button tooltips refresh several times a second; cache each suffix per tooltip text.
 local cache = {}
 local cacheKeys = {}
 local CACHE_SIZE = 200
 
+-- Returns the cached value for key, calling build() (which may return false) on a miss.
+local function Cached(key, build)
+    local value = cacheKeys[key]
+    if value == nil then
+        value = build()
+        if #cache >= CACHE_SIZE then
+            cacheKeys[table.remove(cache, 1)] = nil
+        end
+        cache[#cache + 1] = key
+        cacheKeys[key] = value
+    end
+    return value
+end
+
 -- Returns a list of { kind, ratio, perTick, aoe, comboPoints } in ORDER, empty if nothing could
 -- be calculated. stats defaults to the player's current GetCombatStats().
 local function ComputeRatios(lines, cost, spellName, stats)
-    local totals, perTick, aoe, absorbDrain, comboPoints = Analyze(lines, spellName, stats or GetCombatStats())
+    local a = Analyze(lines, spellName, stats or GetCombatStats())
     local ratios = {}
     for _, kind in ipairs(ORDER) do
-        local total = totals[kind]
+        local total = a.totals[kind]
         if total and total > 0 then
             -- Shields that drain mana as they absorb (Mana Shield) cost the cast plus the drain.
             local totalCost = cost
-            if kind == "absorb" and absorbDrain then
-                totalCost = cost + total * absorbDrain
+            if kind == "absorb" and a.absorbDrain then
+                totalCost = cost + total * a.absorbDrain
             end
-            ratios[#ratios + 1] = { kind = kind, ratio = total / totalCost, perTick = perTick[kind],
-                aoe = aoe[kind], comboPoints = comboPoints }
+            ratios[#ratios + 1] = { kind = kind, ratio = total / totalCost, perTick = a.perTick[kind],
+                aoe = a.aoe[kind], comboPoints = a.comboPoints }
         end
     end
     return ratios
+end
+
+-- Global cooldown in seconds: energy users (Rogues, cat form) have a 1 sec GCD.
+local function GlobalCooldown(resource)
+    return (resource and resource.key == "energy") and 1 or 1.5
+end
+
+-- Damage per second of casting a spell back to back. Only for spells that can be: no cooldown,
+-- not a next-swing ability, not a combo point finisher. A cast takes its cast time, but never
+-- less than the global cooldown (so instants use the GCD). Normal casts count only the damage
+-- that lands on impact, because recasting doesn't stack a damage-over-time effect; channels count
+-- everything they do over the channel.
+-- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
+-- Returns { dps, aoe } or nil.
+local function ComputeDPS(lines, cast, spellName, stats, resource)
+    if not cast or cast.kind == "nextswing" or (cast.cooldown and cast.cooldown > 0) then return nil end
+    local a = Analyze(lines, spellName, stats or GetCombatStats())
+    if a.comboPoints then return nil end
+    local damage, isAoE, seconds
+    if cast.kind == "channeled" then
+        if a.perTick.damage then return nil end
+        damage, isAoE, seconds = a.totals.damage, a.aoe.damage, a.duration
+    else
+        damage, isAoE, seconds = a.direct.damage, a.directAoe.damage, cast.seconds or 0
+    end
+    if not (damage and damage > 0 and seconds) then return nil end
+    return { dps = damage / math.max(seconds, GlobalCooldown(resource)), aoe = isAoE }
 end
 
 local function BuildSuffix(lines, cost, resource, spellName, stats)
@@ -456,24 +519,32 @@ local function BuildSuffix(lines, cost, resource, spellName, stats)
     return "  (" .. table.concat(parts, ", ") .. ")"
 end
 
-local function GetSuffix(lines, cost, resource, spellName)
-    local stats = GetCombatStats()
-    local key = format("%s|%s|%s|%.1f|%.1f|%.1f|%s", cost, resource.key, spellName or "", stats.melee or 0,
-        stats.ranged or 0, stats.ap or 0, table.concat(lines, "|"))
-    local suffix = cacheKeys[key]
-    if suffix == nil then
-        suffix = BuildSuffix(lines, cost, resource, spellName, stats)
-        if #cache >= CACHE_SIZE then
-            cacheKeys[table.remove(cache, 1)] = nil
-        end
-        cache[#cache + 1] = key
-        cacheKeys[key] = suffix
-    end
-    return suffix
+local function StatsKey(stats)
+    return format("%.1f|%.1f|%.1f", stats.melee or 0, stats.ranged or 0, stats.ap or 0)
 end
 
--- True if a line already carries our suffix ("dmg/rage").
+local function GetSuffix(lines, cost, resource, spellName)
+    local stats = GetCombatStats()
+    local key = format("ratio|%s|%s|%s|%s|%s", cost, resource.key, spellName or "", StatsKey(stats),
+        table.concat(lines, "|"))
+    return Cached(key, function() return BuildSuffix(lines, cost, resource, spellName, stats) end)
+end
+
+-- Suffix for the cast time line, e.g. "  (52.3 dps)", or false.
+local function GetDPSSuffix(lines, cast, resource, spellName)
+    local stats = GetCombatStats()
+    local key = format("dps|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
+        resource and resource.key or "", spellName or "", StatsKey(stats), table.concat(lines, "|"))
+    return Cached(key, function()
+        local r = ComputeDPS(lines, cast, spellName, stats, resource)
+        if not r then return false end
+        return format("  (|c%s%s dps%s|r)", COLORS.damage, FormatRatio(r.dps), r.aoe and " per target" or "")
+    end)
+end
+
+-- True if a line already carries one of our suffixes ("dmg/rage", "52.3 dps").
 local function IsAnnotated(text)
+    if text:find("%d dps") then return true end
     for _, res in ipairs(RESOURCES) do
         for _, label in pairs(LABELS) do
             if text:find(label .. "/" .. res.key, 1, true) then return true end
@@ -482,12 +553,32 @@ local function IsAnnotated(text)
     return false
 end
 
+-- Cast time line: "1.5 sec cast", "instant", "channeled", "next melee" (Heroic Strike).
+-- Returns kind ("cast", "instant", "channeled" or "nextswing") and the cast time in seconds.
+local function MatchCast(text)
+    local seconds = text:match("^(%d+%.?%d*) sec cast%s*$")
+    if seconds then return "cast", ToNum(seconds) end
+    if text:find("^instant%s*$") or text:find("^instant cast%s*$") then return "instant", 0 end
+    if text:find("^channeled%s*$") then return "channeled", nil end
+    if text:find("^next melee%s*$") or text:find("^next ranged%s*$") then return "nextswing", nil end
+end
+
+-- Cooldown in seconds from "6 sec cooldown" or "10 min cooldown", or nil.
+local function MatchCooldown(text)
+    local sec = text:match("^(%d+%.?%d*) sec cooldown")
+    if sec then return ToNum(sec) end
+    local min = text:match("^(%d+%.?%d*) min cooldown")
+    return min and ToNum(min) * 60
+end
+
 -- Reads a named spell tooltip. Returns the cost font string, the resource, the cost (nil for
--- percentage costs) and the normalized description lines; returns nothing if there's no mana,
--- rage or energy cost or the tooltip is already annotated.
+-- percentage costs), the normalized description lines and the cast info
+-- { line = font string, kind, seconds, cooldown } (see MatchCast).
+-- The cost values or cast are nil when the tooltip has no such line. Returns nothing if it has
+-- neither, or is already annotated.
 local function ReadSpellTooltip(tooltip)
     local name = tooltip:GetName()
-    local costLine, resource, cost
+    local costLine, resource, cost, cast, cooldown
     local lines = {}
     for i = 2, tooltip:NumLines() do
         local fontString = _G[name .. "TextLeft" .. i]
@@ -496,42 +587,81 @@ local function ReadSpellTooltip(tooltip)
             if IsAnnotated(text) then return end
             local lower = Normalize(text)
             if lower:find("^next rank") then break end
-            local lineResource, lineCost
-            if not costLine and i <= 5 then
-                lineResource, lineCost = MatchCost(lower)
+            local lineResource, lineCost, castKind, castSeconds, lineCooldown
+            if i <= 5 then
+                if not costLine then lineResource, lineCost = MatchCost(lower) end
+                if not lineResource and not cast then castKind, castSeconds = MatchCast(lower) end
+                if not (lineResource or castKind) then lineCooldown = MatchCooldown(lower) end
+                -- The range and cooldown sit to the right of the cost and cast lines.
+                local right = _G[name .. "TextRight" .. i]
+                local rightText = right and right:IsShown() and right:GetText()
+                if rightText and not issecret(rightText) then
+                    cooldown = cooldown or MatchCooldown(Normalize(rightText))
+                end
             end
             if lineResource then
                 costLine, resource, cost = fontString, lineResource, lineCost
+            elseif castKind then
+                cast = { line = fontString, kind = castKind, seconds = castSeconds }
+            elseif lineCooldown then
+                cooldown = cooldown or lineCooldown
             else
                 lines[#lines + 1] = lower
             end
         end
     end
-    if not costLine then return end
-    return costLine, resource, cost, lines
+    if cast then cast.cooldown = cooldown end
+    if not (costLine or cast) then return end
+    return costLine, resource, cost, lines, cast
 end
+
+local GetBaseCooldown = GetSpellBaseCooldown
+
+-- Cooldown in seconds from the API, for cooldowns the tooltip text didn't show; nil if unknown.
+local function GetCooldownFromAPI(spellID)
+    if not (GetBaseCooldown and spellID) then return nil end
+    local ok, ms = pcall(GetBaseCooldown, spellID)
+    return ok and type(ms) == "number" and ms / 1000 or nil
+end
+
+-- Settings; replaced by the saved variables on ADDON_LOADED.
+local DEFAULTS = { efficiency = true, dps = true }
+ns.db = {}
+for k, v in pairs(DEFAULTS) do ns.db[k] = v end
 
 local function Process(tooltip, spellID)
     if not tooltip or (tooltip.IsForbidden and tooltip:IsForbidden()) then return end
     local name = tooltip:GetName()
     if not name or not TOOLTIPS[name] then return end
 
-    local costLine, resource, cost, lines = ReadSpellTooltip(tooltip)
-    if not costLine then return end
-
-    cost = cost or GetCostFromAPI(spellID, resource)
-    if not cost or cost <= 0 then return end
+    local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
+    if not lines then return end
 
     local titleLine = _G[name .. "TextLeft1"]
     local spellName = titleLine and titleLine:GetText()
     if spellName and issecret(spellName) then spellName = nil end
-    ns.lastSpell = { name = spellName, id = spellID, lines = lines }
-    local suffix = GetSuffix(lines, cost, resource, spellName and Normalize(spellName))
-    if not suffix then return end
+    ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
+    spellName = spellName and Normalize(spellName)
 
-    costLine:SetText(costLine:GetText() .. suffix)
-    if tooltip:IsShown() then
-        tooltip:Show() -- resize to fit the longer line
+    local changed = false
+    if ns.db.efficiency and costLine then
+        cost = cost or GetCostFromAPI(spellID, resource)
+        local suffix = cost and cost > 0 and GetSuffix(lines, cost, resource, spellName)
+        if suffix then
+            costLine:SetText(costLine:GetText() .. suffix)
+            changed = true
+        end
+    end
+    if ns.db.dps and cast then
+        if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
+        local suffix = GetDPSSuffix(lines, cast, resource, spellName)
+        if suffix then
+            cast.line:SetText(cast.line:GetText() .. suffix)
+            changed = true
+        end
+    end
+    if changed and tooltip:IsShown() then
+        tooltip:Show() -- resize to fit the longer lines
     end
 end
 
@@ -550,6 +680,7 @@ end
 
 ns.Analyze = Analyze
 ns.ComputeRatios = ComputeRatios
+ns.ComputeDPS = ComputeDPS
 ns.ReadSpellTooltip = ReadSpellTooltip
 ns.GetCostFromAPI = GetCostFromAPI
 ns.Normalize = Normalize
@@ -560,6 +691,7 @@ ns.supported = SUPPORTED_LOCALES[GetLocale()] or false
 local PREFIX = "|cff80c8ffResource Efficiency Tooltips|r"
 
 -- /ret: opens the spellbook efficiency report.
+-- /ret config: opens the settings window.
 -- /ret help: lists the commands.
 -- /ret debug: prints the text of the last annotated spell tooltip, for debugging the parser.
 SLASH_RESOURCEEFFICIENCYTOOLTIPS1 = "/ret"
@@ -568,30 +700,54 @@ SlashCmdList.RESOURCEEFFICIENCYTOOLTIPS = function(msg)
     if command == "help" then
         print(PREFIX .. " commands:")
         print("  /ret - open or close the spellbook efficiency report")
+        print("  /ret config - choose what the tooltips show")
         print("  /ret debug - print the parsed text of the last spell you hovered")
         print("  /ret help - show this list")
         return
     end
-    if command ~= "debug" then
+    if command == "report" then
         ns.ToggleReport()
+        return
+    end
+    if command == "config" then
+        ns.ToggleConfig()
+        return
+    end
+    if command ~= "debug" then
+        ns.ToggleConfig()
         return
     end
     local last = ns.lastSpell
     if not last then
-        print(PREFIX .. ": hover a spell with a mana, rage or energy cost first.")
+        print(PREFIX .. ": hover a spell with a cost or cast time first.")
         return
     end
     print(format("%s: %s (%s)", PREFIX, tostring(last.name), tostring(last.id)))
+    local cast = last.cast
+    if cast then
+        print(format("  cast: %s, %s sec, cooldown %s", cast.kind, tostring(cast.seconds), tostring(cast.cooldown)))
+    end
     for i, line in ipairs(last.lines) do
         print(format("  %d: %s", i, line))
     end
 end
 
--- Startup line with the version from the .toc.
+-- Loads the saved settings, then prints a startup line with the version from the .toc on login.
 local GetMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 local loginFrame = CreateFrame("Frame")
+loginFrame:RegisterEvent("ADDON_LOADED")
 loginFrame:RegisterEvent("PLAYER_LOGIN")
-loginFrame:SetScript("OnEvent", function(self)
+loginFrame:SetScript("OnEvent", function(self, event, loadedName)
+    if event == "ADDON_LOADED" then
+        if loadedName ~= addonName then return end
+        self:UnregisterEvent("ADDON_LOADED")
+        if type(ResourceEfficiencyTooltipsDB) ~= "table" then ResourceEfficiencyTooltipsDB = {} end
+        for k, v in pairs(DEFAULTS) do
+            if ResourceEfficiencyTooltipsDB[k] == nil then ResourceEfficiencyTooltipsDB[k] = v end
+        end
+        ns.db = ResourceEfficiencyTooltipsDB
+        return
+    end
     self:UnregisterEvent("PLAYER_LOGIN")
     local version = GetMetadata and GetMetadata(addonName, "Version")
     print(format("%s%s loaded. Type /ret help for commands.", PREFIX, version and (" v" .. version) or ""))
