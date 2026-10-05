@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, and **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`. `/ret config` toggles each part. It also has a `/ret` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
+A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, and **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`. `/ret config` toggles each part. It also has a `/ret report` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
 
 ## Repo layout and packaging rule
 
@@ -9,7 +9,7 @@ CLAUDE.md, DESCRIPTION.md, icon.png, *.zip    <- repo root: never shipped
 ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zipped for CurseForge
     ResourceEfficiencyTooltips.toc
     ResourceEfficiencyTooltips.lua            <- parser, tooltip hook, slash commands, startup line
-    Report.lua                                <- /ret spellbook report window
+    Report.lua                                <- /ret report spellbook report window
     Config.lua                                <- /ret config settings window (two checkboxes)
     icon.tga                                  <- addon-list icon (64x64, 32-bit TGA with alpha)
 ```
@@ -43,10 +43,10 @@ The pipeline, top to bottom in the file:
      - classified by `ClauseKind`: `false` means not throughput and resets the inherited kind; `nil` means inherit the previous clause's kind. Then `FindAmount` takes the first real number (skipping `UNIT_WORDS` like yards, sec, %, combo points, and "by N" modifiers; averaging "X to Y" and "X-Y"), and `TickMultiplier` turns per-tick amounts into totals.
    - A sentence matching `AOE_PATTERNS` marks its amounts as *per target*.
 5. **`ComputeRatios`** gives total ÷ cost per kind. For absorbs, `ParseAbsorbDrain` adds Mana Shield's drain to the cost.
-6. **`ComputeDPS`** is damage ÷ max(cast time, GCD). The GCD is 1 sec for energy and 1.5 sec otherwise. It returns nil when there's a cooldown (tooltip text, or `GetSpellBaseCooldown` as a backstop in `Process`), for next-swing abilities and for finishers. Normal casts use `Analyze`'s `direct` totals (no over-time clauses, charges or summons). Channels use the full total over `duration`.
+6. **`ComputeDPS`** is damage ÷ max(cast time, GCD). The GCD is 1 sec for energy and 1.5 sec otherwise. It returns nil when there's a cooldown (tooltip text, or `GetSpellBaseCooldown` as a backstop in `Process`), for next-swing abilities and for finishers. Normal casts add `direct` ÷ time per cast to each entry in `dots` at total ÷ max(its duration, time per cast). Recasting refreshes a DoT rather than stacking it, so Flamestrike (120 on impact, 3 sec cast, 80 over 8 sec) is 120/3 + 80/8 = 50. A DoT with no duration (`dotUnknown`) means no DPS. Charges count towards neither. Channels use the full total over `duration`.
 7. **`GetSuffix` / `GetDPSSuffix`** build the coloured suffixes and cache them through `Cached` in a 200-entry FIFO, keyed on cost or cast info, resource, name, combat stats and lines. Action-button tooltips refresh several times a second, so the cache matters. `Process` applies each suffix only if its `ns.db` setting is on.
 
-`Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `absorbDrain`, `comboPoints`, `duration`).
+`Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `dots`, `dotUnknown`, `absorbDrain`, `comboPoints`, `duration`). `TickMultiplier` also returns each over-time clause's duration.
 
 **Settings** live in `ns.db`: the defaults until `ADDON_LOADED`, then the saved variable `ResourceEfficiencyTooltipsDB` (`efficiency`, `dps`, both default true).
 
@@ -60,7 +60,7 @@ The pipeline, top to bottom in the file:
 - **Finishers are rated at max combo points** and labelled "at 5 CP" in tooltips, "5cp" in the report.
 - **Conversions are ignored** (`CONVERSION_PATTERNS`): Mana Burn's per-mana damage and Execute's per-extra-rage damage.
 - **"Stacks up to N times" is not charges.** This was the Arcane Blast bug.
-- **DPS only for spells cast back to back:** no cooldown, not next-swing, not a finisher. Instants use the GCD. Damage over time is excluded for normal casts, because recasting doesn't stack it, so DoT-only spells show no DPS. Channels count everything over the channel. AoE is per target. DPS doesn't model resource limits or auto attacks.
+- **DPS only for spells cast back to back:** no cooldown, not next-swing, not a finisher. Instants use the GCD. Damage over time counts at its sustained rate while spamming (total ÷ max(duration, time per cast)), because recasting refreshes it rather than stacking it. Channels count everything over the channel. AoE is per target. DPS doesn't model resource limits or auto attacks.
 - **Per-tick / per-target labels** appear when a duration can't be found, or the effect hits several targets.
 - **English only.** `SUPPORTED_LOCALES` is enUS and enGB. Other locales leave tooltips untouched rather than show wrong numbers, and the report refuses to open.
 - **Don't guess.** When something can't be calculated honestly, show nothing rather than a misleading number.
@@ -127,13 +127,18 @@ DPS cases (`ns.ComputeDPS(lines, { kind, seconds, cooldown }, name, nil, resourc
 | Spell | Cast | Expected | Covers |
 |---|---|---|---|
 | Frostbolt (18 to 20) | 1.5 sec | 12.67 | basic |
-| Fireball (16 to 25 + 2 over 4 sec) | 1.5 sec | 13.67 | DoT part excluded |
+| Fireball (16 to 25 + 2 over 4 sec) | 1.5 sec | 20.5/1.5 + 2/4 = 14.17 | DoT at its own rate |
+| Flamestrike (120 + 80 over 8 sec, all enemies) | 3 sec | 50 per target | DoT refreshed by recasting |
+| 10 + 6 over 2 sec | 3 sec | 16/3 | DoT shorter than the cast lands in full |
+| Corruption (40 over 12 sec) | instant | 3.33 | DoT only |
+| Searing Totem (9 to 11, repeatedly, 30 sec) | instant | 130/30 | summon as DoT |
+| 5 every 3 sec, no duration | 2 sec | nothing | `dotUnknown` |
 | Smite (15 to 20) | 1.0 sec | 11.67 | GCD floor |
 | Arcane Explosion (32 to 36, all enemies) | instant, mana | 22.67 per target | instant uses 1.5 GCD |
 | Sinister Strike | instant, energy | 103 | 1 sec energy GCD |
 | Arcane Missiles (24 each second for 3 sec) | channeled | 24 | channel |
 | Blizzard (200 over 8 sec) | channeled | 25 per target | channel AoE |
-| Corruption, Lightning Shield, Searing Totem | instant | nothing | DoT / charges / summon |
+| Lightning Shield | instant | nothing | charges |
 | Mortal Strike (6 sec cooldown), Heroic Strike (next melee), Eviscerate | — | nothing | not repeatable |
 
 ## Known gaps
@@ -152,4 +157,4 @@ DPS cases (`ns.ComputeDPS(lines, { kind, seconds, cooldown }, name, nil, resourc
 - Guard every client API that may not exist on this client (`C_Spell`, `C_SpellBook`, `C_AddOns`, `TooltipDataProcessor`, `Enum.*`), falling back to the legacy global.
 - Treat tooltip text as possibly secret (`issecretvalue`), as `ReadSpellTooltip` and `Process` do.
 - Chat messages start with the coloured addon name (`|cff80c8ffResource Efficiency Tooltips|r`).
-- Slash commands: `/ret` (report), `/ret config`, `/ret debug`, `/ret help`. A new command must also be added to the `help` output and to `DESCRIPTION.md`.
+- Slash commands: `/ret` (help + settings), `/ret report`, `/ret config`, `/ret debug`, `/ret help`. A new command must also be added to the `help` output and to `DESCRIPTION.md`.

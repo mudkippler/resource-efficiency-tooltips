@@ -205,9 +205,10 @@ end
 
 -- Turns a per-tick amount into a total: "26 damage each second for 3 sec" -> x3.
 -- Summons that "repeatedly attack" use shotInterval (seconds) over their duration.
--- Returns multiplier, isPerTick (true when ticks were found but no duration).
+-- Returns multiplier, isPerTick (true when ticks were found but no duration), and the seconds
+-- the effect lasts (nil if it isn't over time or no duration was found).
 local function TickMultiplier(clause, rest, lasts, shotInterval)
-    if rest:find("over%s+%d") then return 1, false end -- already a total
+    if rest:find("over%s+%d") then return 1, false, ParseDuration(rest, "over") end -- already a total
     local interval = rest:match("every%s+(%d+%.?%d*)%s*sec")
     interval = interval and ToNum(interval)
     if not interval and (rest:find("every%s+sec") or rest:find("each%s+sec") or rest:find("per%s+sec")) then
@@ -220,7 +221,7 @@ local function TickMultiplier(clause, rest, lasts, shotInterval)
     if not interval or interval <= 0 then return 1, false end
     local duration = ParseDuration(rest, "for") or ParseDuration(clause, "for") or lasts
     if not duration then return 1, true end
-    return math.max(1, math.floor(duration / interval + 0.5)), false
+    return math.max(1, math.floor(duration / interval + 0.5)), false, duration
 end
 
 local function IsConversion(clause)
@@ -360,14 +361,18 @@ end
 -- stats: GetCombatStats() for weapon-based abilities.
 -- Returns a table with:
 --   totals[kind], perTick[kind], aoe[kind]: everything one cast does;
---   direct[kind], directAoe[kind]: only what lands on impact (no over-time effects, charges or
---     summons), used for DPS;
+--   direct[kind], directAoe[kind]: only what lands on impact, used for DPS;
+--   dots[kind]: list of { total, duration, aoe } for each over-time effect (damage over time,
+--     ticks, summons that repeatedly attack), used for DPS;
+--   dotUnknown[kind]: true if an over-time effect had no duration, so DPS can't be calculated;
+--   charges count towards totals only, because they trigger when the caster is hit, not on cast;
 --   absorbDrain: mana per point absorbed, or nil;
 --   comboPoints: the combo points a finisher was rated at, or nil;
 --   duration: seconds from "over N sec", "for N sec" or "lasts N sec" (a channel's length), or nil.
 local function Analyze(lines, spellName, stats)
-    local totals, perTick, aoe, direct, directAoe = {}, {}, {}, {}, {}
-    local result = { totals = totals, perTick = perTick, aoe = aoe, direct = direct, directAoe = directAoe }
+    local totals, perTick, aoe, direct, directAoe, dots, dotUnknown = {}, {}, {}, {}, {}, {}, {}
+    local result = { totals = totals, perTick = perTick, aoe = aoe, direct = direct, directAoe = directAoe,
+        dots = dots, dotUnknown = dotUnknown }
     stats = stats or {}
     -- Descriptions can span several lines in one font string.
     local split = {}
@@ -397,11 +402,19 @@ local function Analyze(lines, spellName, stats)
             local kind
             local sentenceIsAoE = IsAoE(sentence)
             local clauses = sentence:gsub("%s+and%s+", "\2"):gsub(";", "\2")
-            local function add(value, mult, tick, overTime)
+            local function add(value, mult, tick, overTime, duration)
                 totals[kind] = (totals[kind] or 0) + value * mult * charges
                 perTick[kind] = perTick[kind] or tick
                 aoe[kind] = aoe[kind] or sentenceIsAoE
-                if not (overTime or tick or mult > 1 or charges > 1) then
+                if charges > 1 then return end
+                if overTime or tick or mult > 1 then
+                    if duration and duration > 0 and not tick then
+                        dots[kind] = dots[kind] or {}
+                        table.insert(dots[kind], { total = value * mult, duration = duration, aoe = sentenceIsAoE })
+                    else
+                        dotUnknown[kind] = true
+                    end
+                else
                     direct[kind] = (direct[kind] or 0) + value
                     directAoe[kind] = directAoe[kind] or sentenceIsAoE
                 end
@@ -422,8 +435,8 @@ local function Analyze(lines, spellName, stats)
                     if kind then
                         local value, rest = FindAmount(clause)
                         if value and value > 0 then
-                            local mult, tick = TickMultiplier(clause, rest, lasts, shotInterval)
-                            add(value, mult, tick, IsOverTime(clause))
+                            local mult, tick, duration = TickMultiplier(clause, rest, lasts, shotInterval)
+                            add(value, mult, tick, IsOverTime(clause), duration)
                         end
                     end
                 end
@@ -488,24 +501,34 @@ end
 
 -- Damage per second of casting a spell back to back. Only for spells that can be: no cooldown,
 -- not a next-swing ability, not a combo point finisher. A cast takes its cast time, but never
--- less than the global cooldown (so instants use the GCD). Normal casts count only the damage
--- that lands on impact, because recasting doesn't stack a damage-over-time effect; channels count
--- everything they do over the channel.
+-- less than the global cooldown (so instants use the GCD).
+-- Normal casts: impact damage / time per cast, plus each damage-over-time effect at the rate it
+-- keeps ticking while recast: total / max(its duration, time per cast). Recasting refreshes the
+-- effect rather than stacking it, so Flamestrike (120 on impact, 3 sec cast, 80 over 8 sec) is
+-- 120/3 + 80/8 = 50; a DoT shorter than the cast time lands in full every cast.
+-- Channels: everything they do over the channel.
 -- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
 -- Returns { dps, aoe } or nil.
 local function ComputeDPS(lines, cast, spellName, stats, resource)
     if not cast or cast.kind == "nextswing" or (cast.cooldown and cast.cooldown > 0) then return nil end
     local a = Analyze(lines, spellName, stats or GetCombatStats())
     if a.comboPoints then return nil end
-    local damage, isAoE, seconds
+    local gcd = GlobalCooldown(resource)
     if cast.kind == "channeled" then
-        if a.perTick.damage then return nil end
-        damage, isAoE, seconds = a.totals.damage, a.aoe.damage, a.duration
-    else
-        damage, isAoE, seconds = a.direct.damage, a.directAoe.damage, cast.seconds or 0
+        local damage, seconds = a.totals.damage, a.duration
+        if a.perTick.damage or not (damage and damage > 0 and seconds) then return nil end
+        return { dps = damage / math.max(seconds, gcd), aoe = a.aoe.damage }
     end
-    if not (damage and damage > 0 and seconds) then return nil end
-    return { dps = damage / math.max(seconds, GlobalCooldown(resource)), aoe = isAoE }
+    if a.dotUnknown.damage then return nil end
+    local seconds = math.max(cast.seconds or 0, gcd)
+    local dps = (a.direct.damage or 0) / seconds
+    local isAoE = a.directAoe.damage
+    for _, dot in ipairs(a.dots.damage or {}) do
+        dps = dps + dot.total / math.max(dot.duration, seconds)
+        isAoE = isAoE or dot.aoe
+    end
+    if dps <= 0 then return nil end
+    return { dps = dps, aoe = isAoE }
 end
 
 local function BuildSuffix(lines, cost, resource, spellName, stats)
@@ -690,7 +713,16 @@ ns.supported = SUPPORTED_LOCALES[GetLocale()] or false
 
 local PREFIX = "|cff80c8ffResource Efficiency Tooltips|r"
 
--- /ret: opens the spellbook efficiency report.
+local function PrintHelp()
+    print(PREFIX .. " commands:")
+    print("  /ret report - open or close the spellbook efficiency report")
+    print("  /ret config - choose what the tooltips show")
+    print("  /ret debug - print the parsed text of the last spell you hovered")
+    print("  /ret help - show this list")
+end
+
+-- /ret: opens the settings window and lists the commands.
+-- /ret report: opens the spellbook efficiency report.
 -- /ret config: opens the settings window.
 -- /ret help: lists the commands.
 -- /ret debug: prints the text of the last annotated spell tooltip, for debugging the parser.
@@ -698,11 +730,12 @@ SLASH_RESOURCEEFFICIENCYTOOLTIPS1 = "/ret"
 SlashCmdList.RESOURCEEFFICIENCYTOOLTIPS = function(msg)
     local command = (msg or ""):lower():match("^%s*(%S*)")
     if command == "help" then
-        print(PREFIX .. " commands:")
-        print("  /ret - open or close the spellbook efficiency report")
-        print("  /ret config - choose what the tooltips show")
-        print("  /ret debug - print the parsed text of the last spell you hovered")
-        print("  /ret help - show this list")
+        PrintHelp()
+        return
+    end
+    if command == "" then
+        PrintHelp()
+        ns.ToggleConfig()
         return
     end
     if command == "report" then
