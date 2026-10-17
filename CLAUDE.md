@@ -103,7 +103,7 @@ The pipeline, top to bottom in the file:
 - Writes `SpellCoefficients.lua` with a header giving the generation time and source.
 - Checks the result with `luac5.1 -p` before replacing the old file.
 
-The query reads the base tables directly (`SpellEffect` and `SpellClassOptions`, plus `SpellName` for a trailing name comment), not the `RET_SPELL_DATA` view. It also filters `DifficultyID = 0`, because some spells have raid-difficulty copies of the same effect (Flame Spear, Blast Wave). The SQL files in `data/` use CRLF line endings, unlike the addon. To change the data, change the query and re-run the script; never edit `SpellCoefficients.lua` by hand.
+The query reads the base tables directly (`SpellEffect` and `SpellClassOptions`), not the `RET_SPELL_DATA` view. The output has no spaces or comments apart from the one-line generation timestamp, because the file ships and its size matters. To look up which spell an ID is, query `SpellName` in the database. It also filters `DifficultyID = 0`, because some spells have raid-difficulty copies of the same effect (Flame Spear, Blast Wave). The SQL files in `data/` use CRLF line endings, unlike the addon. To change the data, change the query and re-run the script; never edit `SpellCoefficients.lua` by hand.
 
 ## Testing outside the game
 

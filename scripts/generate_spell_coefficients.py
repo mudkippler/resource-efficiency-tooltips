@@ -23,17 +23,10 @@ DB_NAME = "spelldb.db"
 SQL_NAME = "SELECT_RET_SPELL_DATA_AS_LUA.sql"
 LUAC_FALLBACK = Path(r"C:\tools\lua51\luac5.1.exe")
 
+# Kept to the generation time only, since the file ships; the format is documented in the query.
 HEADER = """\
--- Resource Efficiency Tooltips: spell coefficients
--- Generated {timestamp} by scripts/generate_spell_coefficients.py
--- from {source}. Don't edit by hand: change the query or the data and re-run the script.
---
--- Percent of spell power each spell effect gains, keyed by spell ID, one {{ percent, kind }} per
--- effect in EffectIndex order. kind is damage, heal, weapon, dot or hot (see the query for the
--- source fields). The addon labels these in COEFFICIENT_KINDS and doesn't show weapon parts.
-
+-- Generated {timestamp} from {source} by scripts/generate_spell_coefficients.py
 local _, ns = ...
-
 ns.SPELL_COEFFICIENTS = {{
 """
 

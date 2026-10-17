@@ -1,8 +1,9 @@
 -- Generates the rows of ns.SPELL_COEFFICIENTS (ResourceEfficiencyTooltips/SpellCoefficients.lua).
 -- Paste the output between "ns.SPELL_COEFFICIENTS = {" and "}".
 --
--- One row per spell, one { percent, kind } per spell effect in EffectIndex order:
---     [133] = { { 42.9, "damage" }, { 0, "dot" } }, -- Fireball
+-- One row per spell, one {percent,kind} per spell effect in EffectIndex order, with no spaces or
+-- comments to keep the shipped file small:
+--     [133]={{42.9,"damage"},{0,"dot"}},
 -- kind:
 --     damage  direct school damage      (Effect 2)
 --     heal    direct heal               (Effect 10)
@@ -11,12 +12,10 @@
 --     hot     periodic heal aura        (EffectAura 8)
 -- DifficultyID = 0 skips the raid difficulty copies of some effects (e.g. Flame Spear, Blast Wave).
 SELECT
-    '    [' || SpellID || '] = { ' || GROUP_CONCAT('{ ' || Percent || ', "' || Kind || '" }', ', ')
-        || ' }, -- ' || SpellName AS LuaRow
+    '[' || SpellID || ']={' || GROUP_CONCAT('{' || Percent || ',"' || Kind || '"}', ',') || '},' AS LuaRow
 FROM (
     SELECT
         se.SpellID,
-        COALESCE(sn.Name_lang, '?') AS SpellName,
         -- 42.9 stays 42.9, 100.0 becomes 100
         CASE WHEN ROUND(se.EffectBonusCoefficient * 100, 1) = CAST(ROUND(se.EffectBonusCoefficient * 100, 1) AS INTEGER)
             THEN CAST(ROUND(se.EffectBonusCoefficient * 100, 1) AS INTEGER)
@@ -31,8 +30,6 @@ FROM (
         END AS Kind
     FROM
         SpellEffect se
-    LEFT JOIN
-        SpellName sn ON sn.ID = se.SpellID
     WHERE
         se.DifficultyID = 0
         AND EXISTS (SELECT 1 FROM SpellClassOptions sco WHERE sco.SpellID = se.SpellID)
