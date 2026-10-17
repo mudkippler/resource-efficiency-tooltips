@@ -16,12 +16,19 @@ local SUPPORTED_LOCALES = { enUS = true, enGB = true }
 local TOOLTIPS = { GameTooltip = true, ItemRefTooltip = true }
 
 -- Start of the line added at the bottom of spell tooltips for SPELL_COEFFICIENTS (SpellCoefficients.lua).
-local COEFFICIENT_LABEL = "Spell coefficient"
+-- The colon is part of it so a description that uses the word isn't mistaken for our line.
+local COEFFICIENT_PREFIX = "Coefficient:"
 
--- How each kind of part in SPELL_COEFFICIENTS is labelled. "weapon" isn't listed: weapon damage
--- scales with the weapon, not spell power (Charge's 100%), so those parts aren't shown. Neither are
--- kinds added to the data later until they're given a label here.
-local COEFFICIENT_KINDS = { damage = "damage", heal = "healing", dot = "over time", hot = "over time" }
+-- How each kind of part in SPELL_COEFFICIENTS is labelled when a spell shows several, and its
+-- order: direct parts before periodic ones. "weapon" isn't listed: weapon damage scales with the
+-- weapon, not spell power (Charge's 100%), so those parts aren't shown. Neither are kinds added
+-- to the data later until they're given an entry here.
+local COEFFICIENT_KINDS = {
+    damage = { label = "Direct", order = 1 },
+    heal = { label = "Direct", order = 1 },
+    dot = { label = "DoT", order = 2 },
+    hot = { label = "HoT", order = 2 },
+}
 
 local ORDER = { "damage", "heal", "absorb" }
 local LABELS = { damage = "dmg", heal = "heal", absorb = "absorb" }
@@ -139,10 +146,61 @@ local function GetCostFromAPI(spellID, res)
     return ok and cost or nil
 end
 
+-- Rage an auto attack generates in WoW Forever. A Warrior's main hand: base weapon speed x 3.46
+-- with a one-handed weapon, x 4.50 with a two-handed one. A Druid in Bear Form (Maul): a flat 11
+-- per swing, whatever the weapon.
+local SWING_RAGE_ONE_HAND, SWING_RAGE_TWO_HAND = 3.46, 4.50
+local BEAR_SWING_RAGE = 11
+local MAIN_HAND_SLOT = 16
+
+local weaponCache = {} -- item link -> { speed, twoHand }, or false if the speed can't be read
+local itemScanner
+
+-- The main-hand weapon's base speed ("Speed 3.60", before haste, which UnitAttackSpeed includes) and
+-- whether it's two-handed, read from its tooltip. Returns nil without a readable weapon.
+local function ReadMainHand()
+    local link = GetInventoryItemLink("player", MAIN_HAND_SLOT)
+    if not link then return nil end
+    local weapon = weaponCache[link]
+    if weapon == nil then
+        itemScanner = itemScanner
+            or CreateFrame("GameTooltip", "ResourceEfficiencyTooltipsItemScanner", nil, "GameTooltipTemplate")
+        itemScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
+        itemScanner:SetInventoryItem("player", MAIN_HAND_SLOT)
+        local speed, twoHand = nil, false
+        for i = 1, itemScanner:NumLines() do
+            local left = _G["ResourceEfficiencyTooltipsItemScannerTextLeft" .. i]
+            local right = _G["ResourceEfficiencyTooltipsItemScannerTextRight" .. i]
+            local leftText = left and left:GetText()
+            local rightText = right and right:IsShown() and right:GetText()
+            if leftText and not issecret(leftText) and leftText == "Two-Hand" then twoHand = true end
+            if rightText and not issecret(rightText) then
+                speed = speed or tonumber(rightText:match("^Speed (%d+%.?%d*)"))
+            end
+        end
+        itemScanner:Hide()
+        weapon = speed and { speed = speed, twoHand = twoHand } or false
+        weaponCache[link] = weapon
+    end
+    return weapon or nil
+end
+
 -- Average weapon swing damage (including attack power) and attack power, used for abilities
--- that deal weapon damage. These change with gear, buffs and forms.
+-- that deal weapon damage, and the rage an auto attack generates (swingRage), used for
+-- next-swing abilities. These change with gear, buffs and forms.
 local function ReadCombatStats()
     local stats = {}
+    local _, class = UnitClass("player")
+    if class == "WARRIOR" then
+        -- Its own pcall, so a failed tooltip read doesn't lose the other stats.
+        local ok, weapon = pcall(ReadMainHand)
+        if ok and weapon then
+            stats.swingSpeed, stats.twoHand = weapon.speed, weapon.twoHand
+            stats.swingRage = weapon.speed * (weapon.twoHand and SWING_RAGE_TWO_HAND or SWING_RAGE_ONE_HAND)
+        end
+    elseif class == "DRUID" then
+        stats.swingRage, stats.bearForm = BEAR_SWING_RAGE, true
+    end
     if UnitDamage then
         local minDamage, maxDamage = UnitDamage("player")
         if minDamage and maxDamage and maxDamage > 0 then stats.melee = (minDamage + maxDamage) / 2 end
@@ -310,11 +368,12 @@ end
 -- 45% of your attack power" (Bloodthirst). Abilities that empower the next melee swing replace
 -- an auto attack that would have hit anyway, so only their bonus counts: "increases melee damage
 -- by 157" (Heroic Strike), "next attack by 18 damage" (Maul) and NEXT_SWING_SPELLS.
--- Returns isWeaponStrike, damage (nil when the needed stat isn't available).
+-- Returns isWeaponStrike, damage (nil when the needed stat isn't available), isNextSwing, and the stat
+-- an instant strike used ("melee", "ranged" or "ap"; nil for next-swing abilities).
 local function WeaponAmount(clause, stats, isNextSwingSpell)
     local apPercent = clause:match("(%d+%.?%d*)%% of your attack power")
     if apPercent then
-        return true, stats.ap and stats.ap * ToNum(apPercent) / 100
+        return true, stats.ap and stats.ap * ToNum(apPercent) / 100, false, "ap"
     end
     local percent = clause:match("(%d+%.?%d*)%% weapon damage") or clause:match("(%d+%.?%d*)%% normal damage")
         or clause:match("(%d+%.?%d*)%% damage plus")
@@ -323,17 +382,18 @@ local function WeaponAmount(clause, stats, isNextSwingSpell)
         or clause:match("(%d+%.?%d*) additional damage") or clause:match("ranged damage by (%d+%.?%d*)")
     local nextSwingBonus = clause:match("melee damage by (%d+%.?%d*)") or clause:match("next attack by (%d+%.?%d*)")
     if nextSwingBonus then
-        return true, ToNum(nextSwingBonus)
+        return true, ToNum(nextSwingBonus), true
     end
     if not (percent or bonus or clause:find("weapon damage") or clause:find("normal damage")) then
         return false
     end
     if isNextSwingSpell then
-        return true, bonus and ToNum(bonus) or nil
+        return true, bonus and ToNum(bonus) or nil, true
     end
-    local weapon = clause:find("ranged") and stats.ranged or stats.melee
-    if not weapon then return true, nil end
-    return true, weapon * (percent and ToNum(percent) / 100 or 1) + (bonus and ToNum(bonus) or 0)
+    local source = clause:find("ranged") and "ranged" or "melee"
+    local weapon = stats[source]
+    if not weapon then return true, nil, false, source end
+    return true, weapon * (percent and ToNum(percent) / 100 or 1) + (bonus and ToNum(bonus) or 0), false, source
 end
 
 -- Finishers list an amount per combo point ("1 point: 6-10 damage" ... "5 points: 30-34 damage").
@@ -376,7 +436,10 @@ end
 --   charges count towards totals only, because they trigger when the caster is hit, not on cast;
 --   absorbDrain: mana per point absorbed, or nil;
 --   comboPoints: the combo points a finisher was rated at, or nil;
---   duration: seconds from "over N sec", "for N sec" or "lasts N sec" (a channel's length), or nil.
+--   duration: seconds from "over N sec", "for N sec" or "lasts N sec" (a channel's length), or nil;
+--   nextSwing: true for abilities that empower the next melee swing (WeaponAmount);
+--   weaponSource: the stat an instant weapon strike used ("melee", "ranged" or "ap"), or nil;
+--   conversion: true if a clause converting spare resource into damage was skipped.
 local function Analyze(lines, spellName, stats)
     local totals, perTick, aoe, direct, directAoe, dots, dotUnknown = {}, {}, {}, {}, {}, {}, {}
     local result = { totals = totals, perTick = perTick, aoe = aoe, direct = direct, directAoe = directAoe,
@@ -428,11 +491,14 @@ local function Analyze(lines, spellName, stats)
                 end
             end
             for clause in clauses:gmatch("[^\2]+") do
+                if IsConversion(clause) then result.conversion = true end
                 -- Checked before ClauseKind, which would reject Heroic Strike's "increases melee damage".
-                local isWeaponStrike, weaponDamage = WeaponAmount(clause, stats, isNextSwingSpell)
+                local isWeaponStrike, weaponDamage, isNextSwing, source = WeaponAmount(clause, stats, isNextSwingSpell)
                 local clauseKind = ClauseKind(clause)
                 if isWeaponStrike and not IsConversion(clause) then
                     kind = "damage"
+                    result.nextSwing = result.nextSwing or isNextSwing
+                    result.weaponSource = result.weaponSource or source
                     if weaponDamage and weaponDamage > 0 then
                         add(weaponDamage, 1, false, false)
                     end
@@ -483,10 +549,17 @@ local function Cached(key, build)
 end
 
 -- Returns a list of { kind, ratio, perTick, aoe, comboPoints } in ORDER, empty if nothing could
--- be calculated. stats defaults to the player's current GetCombatStats().
-local function ComputeRatios(lines, cost, spellName, stats)
-    local a = Analyze(lines, spellName, stats or GetCombatStats())
-    local ratios = {}
+-- be calculated, with .notes: sentences explaining calculations that aren't obvious, shown while
+-- Shift is held. stats defaults to the player's current GetCombatStats(); resource is the cost's
+-- resource (RESOURCES entry), may be nil.
+local function ComputeRatios(lines, cost, spellName, stats, resource)
+    stats = stats or GetCombatStats()
+    local a = Analyze(lines, spellName, stats)
+    local ratios, notes = {}, {}
+    ratios.notes = notes
+    -- An empowered swing (Heroic Strike, Cleave, Maul) generates no rage, so the rage it would have
+    -- given is spent too.
+    local forgoneRage = a.nextSwing and resource and resource.key == "rage" and stats.swingRage
     for _, kind in ipairs(ORDER) do
         local total = a.totals[kind]
         if total and total > 0 then
@@ -494,10 +567,37 @@ local function ComputeRatios(lines, cost, spellName, stats)
             local totalCost = cost
             if kind == "absorb" and a.absorbDrain then
                 totalCost = cost + total * a.absorbDrain
+            elseif kind == "damage" and forgoneRage then
+                totalCost = cost + forgoneRage
             end
             ratios[#ratios + 1] = { kind = kind, ratio = total / totalCost, perTick = a.perTick[kind],
                 aoe = a.aoe[kind], comboPoints = a.comboPoints }
         end
+    end
+    if #ratios == 0 then return ratios end
+
+    if a.nextSwing then
+        notes[#notes + 1] = "Only the bonus damage counts, because the swing would have hit anyway."
+    end
+    if forgoneRage and stats.bearForm then
+        notes[#notes + 1] = format("The empowered swing generates no rage, so the %g rage a Bear Form "
+            .. "swing gives counts as cost too: %d + %g rage.", forgoneRage, cost, forgoneRage)
+    elseif forgoneRage then
+        notes[#notes + 1] = format("The empowered swing generates no rage, so the %.1f rage it would have "
+            .. "given (%.2f speed, %s) counts as cost too: %d + %.1f rage.", forgoneRage, stats.swingSpeed,
+            stats.twoHand and "two-handed" or "one-handed", cost, forgoneRage)
+    end
+    if a.weaponSource == "ap" and stats.ap then
+        notes[#notes + 1] = format("Uses your current attack power (%d).", stats.ap)
+    elseif a.weaponSource and stats[a.weaponSource] then
+        notes[#notes + 1] = format("Uses your current %s weapon damage (%d average).",
+            a.weaponSource == "ranged" and "ranged" or "main-hand", stats[a.weaponSource])
+    end
+    if a.absorbDrain and a.totals.absorb then
+        notes[#notes + 1] = format("Counts the %g mana drained per point absorbed as cost too.", a.absorbDrain)
+    end
+    if a.conversion then
+        notes[#notes + 1] = "Extra damage from spending more than the cost isn't counted."
     end
     return ratios
 end
@@ -516,7 +616,7 @@ end
 -- 120/3 + 80/8 = 50; a DoT shorter than the cast time lands in full every cast.
 -- Channels: everything they do over the channel.
 -- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
--- Returns { dps, aoe } or nil.
+-- Returns { dps, aoe, notes } or nil (notes as in ComputeRatios).
 local function ComputeDPS(lines, cast, spellName, stats, resource)
     if not cast or cast.kind == "nextswing" or (cast.cooldown and cast.cooldown > 0) then return nil end
     local a = Analyze(lines, spellName, stats or GetCombatStats())
@@ -525,58 +625,70 @@ local function ComputeDPS(lines, cast, spellName, stats, resource)
     if cast.kind == "channeled" then
         local damage, seconds = a.totals.damage, a.duration
         if a.perTick.damage or not (damage and damage > 0 and seconds) then return nil end
-        return { dps = damage / math.max(seconds, gcd), aoe = a.aoe.damage }
+        return { dps = damage / math.max(seconds, gcd), aoe = a.aoe.damage, notes = {} }
     end
     if a.dotUnknown.damage then return nil end
     local seconds = math.max(cast.seconds or 0, gcd)
     local dps = (a.direct.damage or 0) / seconds
     local isAoE = a.directAoe.damage
-    for _, dot in ipairs(a.dots.damage or {}) do
+    local dots = a.dots.damage or {}
+    for _, dot in ipairs(dots) do
         dps = dps + dot.total / math.max(dot.duration, seconds)
         isAoE = isAoE or dot.aoe
     end
     if dps <= 0 then return nil end
-    return { dps = dps, aoe = isAoE }
+    local notes = {}
+    if #dots > 0 then
+        notes[1] = "DPS counts damage over time at the rate it ticks while you keep recasting, because "
+            .. "recasting refreshes it rather than stacking it."
+    end
+    return { dps = dps, aoe = isAoE, notes = notes }
 end
 
+-- Returns { suffix, notes } for the cost line; suffix is nil when nothing could be calculated.
 local function BuildSuffix(lines, cost, resource, spellName, stats)
+    local ratios = ComputeRatios(lines, cost, spellName, stats, resource)
     local parts = {}
-    for _, r in ipairs(ComputeRatios(lines, cost, spellName, stats)) do
+    for _, r in ipairs(ratios) do
         parts[#parts + 1] = format("|c%s%s %s/%s%s%s%s|r", COLORS[r.kind], FormatRatio(r.ratio),
             LABELS[r.kind], resource.key, r.comboPoints and format(" at %d CP", r.comboPoints) or "",
             r.perTick and " per tick" or "", r.aoe and " per target" or "")
     end
-    if #parts == 0 then return false end
-    return "  (" .. table.concat(parts, ", ") .. ")"
+    if #parts == 0 then return { notes = {} } end
+    return { suffix = "  (" .. table.concat(parts, ", ") .. ")", notes = ratios.notes }
 end
 
 local function StatsKey(stats)
-    return format("%.1f|%.1f|%.1f", stats.melee or 0, stats.ranged or 0, stats.ap or 0)
+    return format("%.1f|%.1f|%.1f|%.2f", stats.melee or 0, stats.ranged or 0, stats.ap or 0, stats.swingRage or 0)
 end
 
+-- Returns the cost line suffix (or nil) and its notes.
 local function GetSuffix(lines, cost, resource, spellName)
     local stats = GetCombatStats()
     local key = format("ratio|%s|%s|%s|%s|%s", cost, resource.key, spellName or "", StatsKey(stats),
         table.concat(lines, "|"))
-    return Cached(key, function() return BuildSuffix(lines, cost, resource, spellName, stats) end)
+    local entry = Cached(key, function() return BuildSuffix(lines, cost, resource, spellName, stats) end)
+    return entry.suffix, entry.notes
 end
 
--- Suffix for the cast time line, e.g. "  (52.3 dps)", or false.
+-- Returns the cast time line suffix, e.g. "  (52.3 dps)" (or nil), and its notes.
 local function GetDPSSuffix(lines, cast, resource, spellName)
     local stats = GetCombatStats()
     local key = format("dps|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
         resource and resource.key or "", spellName or "", StatsKey(stats), table.concat(lines, "|"))
-    return Cached(key, function()
+    local entry = Cached(key, function()
         local r = ComputeDPS(lines, cast, spellName, stats, resource)
-        if not r then return false end
-        return format("  (|c%s%s dps%s|r)", COLORS.damage, FormatRatio(r.dps), r.aoe and " per target" or "")
+        if not r then return { notes = {} } end
+        return { suffix = format("  (|c%s%s dps%s|r)", COLORS.damage, FormatRatio(r.dps),
+            r.aoe and " per target" or ""), notes = r.notes }
     end)
+    return entry.suffix, entry.notes
 end
 
 -- True if a line is one we added or already carries one of our suffixes ("dmg/rage", "52.3 dps",
--- "spell coefficient: 42.9%").
+-- "Coefficient: 42.9%").
 local function IsAnnotated(text)
-    if text:find("%d dps") or text:find(COEFFICIENT_LABEL, 1, true) then return true end
+    if text:find("%d dps") or text:find(COEFFICIENT_PREFIX, 1, true) then return true end
     for _, res in ipairs(RESOURCES) do
         for _, label in pairs(LABELS) do
             if text:find(label .. "/" .. res.key, 1, true) then return true end
@@ -656,19 +768,30 @@ local function GetCooldownFromAPI(spellID)
     return ok and type(ms) == "number" and ms / 1000 or nil
 end
 
--- A spell's coefficients from SPELL_COEFFICIENTS as text, one part per spell effect in the data's
--- order: "81.4% damage", "42.9% damage / 0% over time". Parts without a COEFFICIENT_KINDS label are
--- left out. Returns nil if the spell has no entry or nothing to show.
+-- A spell's coefficients from SPELL_COEFFICIENTS as text. One part is just its percent ("81.4%");
+-- several are labelled, direct parts first ("100% Direct / 15% DoT", Immolate's "20% Direct / 13% DoT").
+-- Parts without a COEFFICIENT_KINDS entry are left out. Returns nil if the spell has no entry or
+-- nothing to show.
 local function FormatCoefficients(spellID)
     local parts = {}
-    for _, part in ipairs(spellID and ns.SPELL_COEFFICIENTS[spellID] or {}) do
-        local percent, kind = part[1], COEFFICIENT_KINDS[part[2]]
+    for i, part in ipairs(spellID and ns.SPELL_COEFFICIENTS[spellID] or {}) do
+        local kind = COEFFICIENT_KINDS[part[2]]
         if kind then
-            parts[#parts + 1] = format("%g%% %s", percent, kind)
+            parts[#parts + 1] = { percent = part[1], label = kind.label, order = kind.order, index = i }
         end
     end
     if #parts == 0 then return nil end
-    return table.concat(parts, " / ")
+    if #parts == 1 then return format("%g%%", parts[1].percent) end
+    -- Effect order breaks ties, so the sort is stable.
+    table.sort(parts, function(a, b)
+        if a.order ~= b.order then return a.order < b.order end
+        return a.index < b.index
+    end)
+    local texts = {}
+    for i, part in ipairs(parts) do
+        texts[i] = format("%g%% %s", part.percent, part.label)
+    end
+    return table.concat(texts, " / ")
 end
 
 -- True if a tooltip already has our coefficient line.
@@ -676,20 +799,47 @@ local function HasCoefficientLine(tooltip, name)
     for i = 1, tooltip:NumLines() do
         local line = _G[name .. "TextLeft" .. i]
         local text = line and line:GetText()
-        if text and not issecret(text) and text:find(COEFFICIENT_LABEL, 1, true) then return true end
+        if text and not issecret(text) and text:find(COEFFICIENT_PREFIX, 1, true) then return true end
     end
     return false
 end
 
--- Settings; replaced by the saved variables on ADDON_LOADED.
--- coefficientsShiftOnly: show the coefficient line only while Shift is held.
-local DEFAULTS = { efficiency = true, dps = true, coefficients = true, coefficientsShiftOnly = true }
+-- Settings; replaced by the saved variables on ADDON_LOADED. Each part of the annotation has an
+-- on/off key and a <part>ShiftOnly key that shows it only while Shift is held.
+local PARTS = { "efficiency", "dps", "coefficients", "notes" }
+local DEFAULTS = {
+    efficiency = true, efficiencyShiftOnly = false,
+    dps = true, dpsShiftOnly = false,
+    coefficients = true, coefficientsShiftOnly = true,
+    notes = true, notesShiftOnly = true,
+}
 ns.db = {}
 for k, v in pairs(DEFAULTS) do ns.db[k] = v end
 
--- GameTooltip while it shows a spell with a coefficient in Shift-only mode, so a Shift press can
--- redraw it (RefreshForShift); cleared whenever the tooltip is cleared.
+-- True if a part is on, and Shift is held when it's Shift-only.
+local function Shown(part)
+    return ns.db[part] and (not ns.db[part .. "ShiftOnly"] or IsShiftKeyDown())
+end
+
+local function AnyShiftOnly()
+    for _, part in ipairs(PARTS) do
+        if ns.db[part] and ns.db[part .. "ShiftOnly"] then return true end
+    end
+    return false
+end
+
+-- GameTooltip while it shows a spell and some part is Shift-only, so a Shift press can redraw it
+-- (RefreshForShift); cleared whenever the tooltip is.
 local shiftTooltip
+
+-- Shown instead of the notes until Shift is held.
+local SHIFT_HINT = "Hold Shift for additional info"
+
+local function AppendNotes(notes, more)
+    for _, note in ipairs(more or {}) do
+        notes[#notes + 1] = note
+    end
+end
 
 local function Process(tooltip, spellID)
     if not tooltip or (tooltip.IsForbidden and tooltip:IsForbidden()) then return end
@@ -697,6 +847,9 @@ local function Process(tooltip, spellID)
     if not name or not TOOLTIPS[name] then return end
 
     local changed = false
+    -- Only filled when a suffix is added, so a second pass bails on that suffix before reaching
+    -- the note lines (IsAnnotated).
+    local notes = {}
     local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
     if lines then
         local titleLine = _G[name .. "TextLeft1"]
@@ -705,33 +858,50 @@ local function Process(tooltip, spellID)
         ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
         spellName = spellName and Normalize(spellName)
 
-        if ns.db.efficiency and costLine then
+        if Shown("efficiency") and costLine then
             cost = cost or GetCostFromAPI(spellID, resource)
-            local suffix = cost and cost > 0 and GetSuffix(lines, cost, resource, spellName)
-            if suffix then
-                costLine:SetText(costLine:GetText() .. suffix)
-                changed = true
+            if cost and cost > 0 then
+                local suffix, suffixNotes = GetSuffix(lines, cost, resource, spellName)
+                if suffix then
+                    costLine:SetText(costLine:GetText() .. suffix)
+                    AppendNotes(notes, suffixNotes)
+                    changed = true
+                end
             end
         end
-        if ns.db.dps and cast then
+        if Shown("dps") and cast then
             if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
-            local suffix = GetDPSSuffix(lines, cast, resource, spellName)
+            local suffix, suffixNotes = GetDPSSuffix(lines, cast, resource, spellName)
             if suffix then
                 cast.line:SetText(cast.line:GetText() .. suffix)
+                AppendNotes(notes, suffixNotes)
                 changed = true
             end
         end
     end
 
+    -- Notes explain calculations that aren't obvious (Heroic Strike's forgone rage). In Shift-only
+    -- mode GameTooltip shows a hint until Shift is held; ItemRefTooltip isn't redrawn on Shift, so
+    -- it always shows them.
+    if ns.db.notes and #notes > 0 then
+        if not ns.db.notesShiftOnly or IsShiftKeyDown() or tooltip ~= GameTooltip then
+            for _, note in ipairs(notes) do
+                tooltip:AddLine(note, 0.8, 0.8, 0.8, true)
+            end
+        else
+            tooltip:AddLine(SHIFT_HINT, 0.5, 0.5, 0.5)
+        end
+        changed = true
+    end
+
     -- The coefficient gets its own line at the bottom, below everything else.
     local coefficients = ns.db.coefficients and FormatCoefficients(spellID)
-    if coefficients then
-        if ns.db.coefficientsShiftOnly and tooltip == GameTooltip then shiftTooltip = tooltip end
-        if (IsShiftKeyDown() or not ns.db.coefficientsShiftOnly) and not HasCoefficientLine(tooltip, name) then
-            tooltip:AddLine(format("%s: |cffffffff%s|r", COEFFICIENT_LABEL, coefficients), 0.5, 0.78, 1)
-            changed = true
-        end
+    if coefficients and Shown("coefficients") and not HasCoefficientLine(tooltip, name) then
+        tooltip:AddLine(format("%s |cffffffff%s|r", COEFFICIENT_PREFIX, coefficients), 0.5, 0.78, 1)
+        changed = true
     end
+
+    if tooltip == GameTooltip and (lines or coefficients) and AnyShiftOnly() then shiftTooltip = tooltip end
 
     if changed and tooltip:IsShown() then
         tooltip:Show() -- resize to fit the longer lines

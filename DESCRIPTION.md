@@ -10,9 +10,9 @@
 
 **Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Damage over time counts at the rate it keeps ticking while you recast the spell. Recasting refreshes it rather than stacking it, so Flamestrike with 120 damage on impact, a 3 sec cast and 80 damage over 8 sec is 120 / 3 + 80 / 8 = 50 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
 
-**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Spell coefficient: 81.4% damage`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts list each one, e.g. Pyroblast's `100% damage / 15% over time`.
+**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Coefficient: 81.4%`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts list each one, direct part first, e.g. Pyroblast's `100% Direct / 15% DoT`.
 
-**Choose what you see.** Type `/ret config` to turn the efficiency, DPS or coefficient part of the tooltip on or off, and to choose whether coefficients need Shift.
+**Choose what you see.** Type `/ret config` to turn each part of the tooltip on or off (efficiency, DPS, coefficients and additional info) and to choose whether each one only shows while you hold Shift. By default coefficients and additional info need Shift, and the rest is always shown.
 
 **Works on macros.** Macros that use `#showtooltip` show the same numbers as the spell itself.
 
@@ -36,7 +36,11 @@ Instant weapon strikes (Sinister Strike, Mortal Strike, Shred, Claw…) count th
 
 Abilities that empower your next swing (Heroic Strike, Maul, Cleave, Raptor Strike) count only the bonus damage, because the swing would have happened anyway
 
+Heroic Strike, Cleave and Maul also count the rage the empowered swing doesn't generate. For a Warrior that's main-hand weapon speed × 3.46 rage with a one-handed weapon, or × 4.50 with a two-handed one. For Maul it's the 11 rage a Bear Form swing gives
+
 Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
+
+**Hold Shift for the details.** Abilities with a calculation that isn't obvious, such as Heroic Strike's rage, show "Hold Shift for additional info". Hold Shift to see how the number was worked out.
 
 **Clear labels for special cases.** AoE abilities are marked _per target_, and effects with no fixed duration are marked _per tick_.
 
@@ -50,7 +54,7 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
 `/ret report` opens or closes the spellbook report.
 
-`/ret config` opens the settings window, where you can turn the efficiency, DPS and coefficient parts of the tooltip on or off.
+`/ret config` opens the settings window, where you can turn each part of the tooltip on or off, or have it show only while you hold Shift.
 
 ![image](https://media.forgecdn.net/attachments/description/1723554/description_3fdb5a7c-ca7d-4967-9a44-1a7ce9f478f1.png)
 

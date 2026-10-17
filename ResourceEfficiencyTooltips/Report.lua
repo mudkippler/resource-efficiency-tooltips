@@ -98,7 +98,7 @@ local function AnalyzeSpell(spell)
     cost = cost or ns.GetCostFromAPI(spell.id, resource)
     if not cost or cost <= 0 then return nil end
 
-    local ratios = ns.ComputeRatios(lines, cost, ns.Normalize(spell.name))
+    local ratios = ns.ComputeRatios(lines, cost, ns.Normalize(spell.name), nil, resource)
     if #ratios == 0 then return nil end
 
     local row = { id = spell.id, name = spell.name, rank = rank, icon = spell.icon, cost = cost,

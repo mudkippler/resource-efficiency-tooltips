@@ -3,18 +3,27 @@
 
 local _, ns = ...
 
-local OPTIONS = {
-    { key = "efficiency", label = "Resource efficiency",
+-- Each part of the annotation, followed by its "Only while Shift is held" option.
+local PARTS = {
+    { key = "efficiency", label = "Resource efficiency", name = "resource efficiency",
         tip = "Damage, healing or absorb per point of mana, rage or energy, on the cost line." },
-    { key = "dps", label = "Damage per second",
+    { key = "dps", label = "Damage per second", name = "damage per second",
         tip = "Damage per second of casting the spell back to back, on the cast time line. "
             .. "Only for spells without a cooldown." },
-    { key = "coefficients", label = "Spell coefficients",
+    { key = "coefficients", label = "Spell coefficients", name = "spell coefficients",
         tip = "The share of your spell power the spell gains, on a line at the bottom of the tooltip." },
-    -- parent: only available while that option is on, and indented under it.
-    { key = "coefficientsShiftOnly", label = "Only while Shift is held", parent = "coefficients",
-        tip = "Show spell coefficients only while you hold Shift. When off, they're always shown." },
+    { key = "notes", label = "Additional info", name = "the additional info",
+        tip = "Explains numbers worked out in a way that isn't obvious, such as Heroic Strike's rage. "
+            .. "In Shift-only mode, a \"Hold Shift for additional info\" line shows until you do." },
 }
+
+-- parent: only available while that option is on, and indented under it.
+local OPTIONS = {}
+for _, part in ipairs(PARTS) do
+    OPTIONS[#OPTIONS + 1] = part
+    OPTIONS[#OPTIONS + 1] = { key = part.key .. "ShiftOnly", label = "Only while Shift is held", parent = part.key,
+        tip = "Show " .. part.name .. " only while you hold Shift. When off, it's always shown." }
+end
 
 local frame
 local checks = {}

@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`, and a **spell coefficient** line at the bottom, e.g. `Spell coefficient: 42.9% damage / 0% over time`. `/ret config` toggles each part. It also has a `/ret report` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
+A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`, and a **spell coefficient** line at the bottom, e.g. `Coefficient: 42.9% Direct / 0% DoT`. `/ret config` toggles each part. It also has a `/ret report` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
 
 ## Target client: WoW Forever only, no backwards compatibility
 
@@ -19,6 +19,7 @@ scripts/                                      <- dev scripts (never shipped)
     Install-Addon.ps1                         <- copies the addon into the Forever beta client
     generate_spell_coefficients.py            <- regenerates SpellCoefficients.lua from the database
 data/<date>/                                  <- spell database snapshot (spelldb.db, CSVs) and its SQL
+tests/                                        <- regression suite: lua5.1 tests/run.lua (never shipped)
 ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zipped for CurseForge
     ResourceEfficiencyTooltips.toc
     ResourceEfficiencyTooltips.lua            <- parser, tooltip hook, slash commands, startup line
@@ -63,11 +64,12 @@ The pipeline, top to bottom in the file:
 5. **`ComputeRatios`** gives total ÷ cost per kind. For absorbs, `ParseAbsorbDrain` adds Mana Shield's drain to the cost.
 6. **`ComputeDPS`** is damage ÷ max(cast time, GCD). The GCD is 1 sec for energy and 1.5 sec otherwise. It returns nil when there's a cooldown (tooltip text, or `GetSpellBaseCooldown` as a backstop in `Process`), for next-swing abilities and for finishers. Normal casts add `direct` ÷ time per cast to each entry in `dots` at total ÷ max(its duration, time per cast). Recasting refreshes a DoT rather than stacking it, so Flamestrike (120 on impact, 3 sec cast, 80 over 8 sec) is 120/3 + 80/8 = 50. A DoT with no duration (`dotUnknown`) means no DPS. Charges count towards neither. Channels use the full total over `duration`.
 7. **`GetSuffix` / `GetDPSSuffix`** build the coloured suffixes and cache them through `Cached` in a 200-entry FIFO, keyed on cost or cast info, resource, name, combat stats and lines. Action-button tooltips refresh several times a second, so the cache matters. `Process` applies each suffix only if its `ns.db` setting is on.
-8. **Coefficient line.** After the suffixes, `Process` adds `Spell coefficient: …` (`COEFFICIENT_LABEL`) as the tooltip's last line via `AddLine`. It runs even when the tooltip has no cost or cast line. The text comes from `FormatCoefficients(spellID)`: each `{ percent, kind }` part as `%g%%` plus its `COEFFICIENT_KINDS` label, joined with ` / ` (`42.9% damage / 0% over time`). Parts whose kind has no label (`weapon`, or anything new) are skipped, and so is the whole line if nothing is left, or there's no spell ID. `HasCoefficientLine` and `IsAnnotated` (which also matches the label) stop a second pass from adding it twice. In Shift-only mode, `Process` remembers GameTooltip in `shiftTooltip` (cleared by `OnTooltipCleared`). `MODIFIER_STATE_CHANGED` for LSHIFT/RSHIFT then calls `RefreshForShift`, which redraws the tooltip through its owner's `UpdateTooltip` or `OnEnter`. ItemRefTooltip gets the line, but isn't redrawn on Shift.
+8. **Coefficient line.** After the suffixes, `Process` adds `Coefficient: …` (`COEFFICIENT_PREFIX`, colon included so a description that uses the word isn't matched) as the tooltip's last line via `AddLine`. It runs even when the tooltip has no cost or cast line. The text comes from `FormatCoefficients(spellID)`: one shown part is just `%g%%` (`81.4%`). Several shown parts are each labelled from `COEFFICIENT_KINDS` (`Direct` for damage and heal, `DoT`, `HoT`), sorted direct before periodic with effect order breaking ties, and joined with ` / `. So Immolate's data, DoT first, still reads `20% Direct / 13% DoT`. Parts whose kind has no entry (`weapon`, or anything new) are skipped, and so is the whole line if nothing is left, or there's no spell ID. `HasCoefficientLine` and `IsAnnotated` (which also matches the label) stop a second pass from adding it twice. In Shift-only mode, `Process` remembers GameTooltip in `shiftTooltip` (cleared by `OnTooltipCleared`). `MODIFIER_STATE_CHANGED` for LSHIFT/RSHIFT then calls `RefreshForShift`, which redraws the tooltip through its owner's `UpdateTooltip` or `OnEnter`. ItemRefTooltip gets the line, but isn't redrawn on Shift.
+9. **Notes.** `ComputeRatios` (as `ratios.notes`) and `ComputeDPS` (`notes`) return sentences explaining calculations that aren't obvious: next-swing bonus only, Warrior forgone rage, the weapon damage or attack power used, Mana Shield's drain, ignored conversions, and DoTs in DPS. They're cached with their suffix and only shown when that suffix is shown. The notes go above the coefficient line. In Shift-only mode (`notesShiftOnly`, the default), GameTooltip shows `SHIFT_HINT` ("Hold Shift for additional info") until Shift is held. ItemRefTooltip can't be redrawn on Shift, so it always shows the notes. The note lines aren't matched by `IsAnnotated`; a second pass bails on the suffix above them instead. To add a note for another special case, add a flag to `Analyze`'s result and a sentence in `ComputeRatios` or `ComputeDPS`.
 
-`Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `dots`, `dotUnknown`, `absorbDrain`, `comboPoints`, `duration`). `TickMultiplier` also returns each over-time clause's duration.
+`Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `dots`, `dotUnknown`, `absorbDrain`, `comboPoints`, `duration`, `nextSwing`, `weaponSource`, `conversion`). `TickMultiplier` also returns each over-time clause's duration.
 
-**Settings** live in `ns.db`: the defaults until `ADDON_LOADED`, then the saved variable `ResourceEfficiencyTooltipsDB` (`efficiency`, `dps`, `coefficients`, `coefficientsShiftOnly`, all default true). `Config.lua` is a small movable window with one checkbox per setting, opened by `ns.ToggleConfig()`. An option with a `parent` (Shift-only under coefficients) is indented, and greyed out while its parent is off. Changes apply the next time a tooltip is shown.
+**Settings** live in `ns.db`: the defaults until `ADDON_LOADED`, then the saved variable `ResourceEfficiencyTooltipsDB`. Each of the four parts in `PARTS` (`efficiency`, `dps`, `coefficients`, `notes`) has an on/off key, all on by default, and a `<part>ShiftOnly` key, which defaults on for coefficients and notes only. `Shown(part)` checks both. Whenever any part is Shift-only, `Process` sets `shiftTooltip` for a GameTooltip spell, so `RefreshForShift` redraws it when Shift is pressed or released. Only the notes get a hint line; a Shift-only efficiency, DPS or coefficient part is simply absent until Shift is held. `Config.lua` is a small movable window with one checkbox per setting, opened by `ns.ToggleConfig()`. `Config.lua` builds its `OPTIONS` from its own `PARTS` list (keep it in step with the main file's), each followed by an indented "Only while Shift is held" option with `parent` set. Those are greyed out while their part is off. Changes apply the next time a tooltip is shown.
 
 **Slash commands** are at the bottom of the main file. A bare `/ret` prints the help (`PrintHelp`) and opens the settings window. `/ret report` toggles the report, `/ret config` the settings, and `/ret debug` prints the last spell's parsed cast info, its coefficient and its lines. Any other argument opens the settings window.
 
@@ -78,11 +80,12 @@ The pipeline, top to bottom in the file:
 - **Amounts come from tooltip text**, so every rank gives its own number. The only live stats used are weapon damage and attack power, through `GetCombatStats` (`UnitDamage`, `UnitRangedDamage`, `UnitAttackPower`, wrapped in pcall).
 - **Instant weapon strikes count the whole hit:** current average weapon damage × percent, plus the flat bonus. Examples: Sinister Strike, Backstab, Mortal Strike, Shred, Claw ("110% normal damage plus 115"), Aimed Shot ("increases *ranged* damage by N") and Bloodthirst (% of attack power).
 - **Next-swing abilities count only their bonus**, because the auto attack would have landed anyway. Detected by wording ("increases *melee* damage by N" for Heroic Strike and Raptor Strike, "next attack by N" for Maul) or by name in `NEXT_SWING_SPELLS` for ones that read like instant strikes (Cleave).
+- **An empowered swing generates no rage**, so rage-costing next-swing abilities (Heroic Strike, Cleave, Maul) cost their rage plus the rage that swing would have given. In WoW Forever an auto attack gives base main-hand speed × 3.46 rage with a one-handed weapon and × 4.50 with a two-handed one (`SWING_RAGE_ONE_HAND/TWO_HAND`). The speed is the weapon's base "Speed", read from its tooltip by `ReadMainHand` with its own hidden scanner (`ResourceEfficiencyTooltipsItemScanner`) and cached per item link. `UnitAttackSpeed` isn't used because it includes haste. Base speed is an assumption; the user gave the formula as "weapon speed". A Druid's Bear Form swing gives a flat 11 rage (`BEAR_SWING_RAGE`, confirmed in game by the user), whatever the weapon, so Maul doesn't read the weapon. `stats.bearForm` gives Maul its own note. Other classes aren't adjusted. A Warrior with no readable weapon isn't adjusted either. The results are in `stats.swingRage` (plus `swingSpeed`/`twoHand` for Warriors) from `GetCombatStats`, part of the cache key.
 - **Finishers are rated at max combo points** and labelled "at 5 CP" in tooltips, "5cp" in the report.
 - **Conversions are ignored** (`CONVERSION_PATTERNS`): Mana Burn's per-mana damage and Execute's per-extra-rage damage.
 - **"Stacks up to N times" is not charges.** This was the Arcane Blast bug.
 - **DPS only for spells cast back to back:** no cooldown, not next-swing, not a finisher. Instants use the GCD. Damage over time counts at its sustained rate while spamming (total ÷ max(duration, time per cast)), because recasting refreshes it rather than stacking it. Channels count everything over the channel. AoE is per target. DPS doesn't model resource limits or auto attacks.
-- **Spell coefficients come from `SPELL_COEFFICIENTS`**, generated from the client's own spell data (the `SpellEffect` table, build 1.60.1.70450). They aren't derived from tooltips or formulas. Each spell is a list of `{ percent, kind }`, one per spell effect in `EffectIndex` order, e.g. `[133] = { { 42.9, "damage" }, { 0, "dot" } }`. The kind comes from `Effect`/`EffectAura`: `damage` (2), `heal` (10), `weapon` (7, 58, 64), `dot` (aura 3) and `hot` (aura 8). Show every part with its label, and never collapse them to one value. `weapon` parts are hidden, because they don't scale with spell power (Charge's 100%). The line says "Spell coefficient", not "spell power coefficient", because the data also gives 100% to `damage` effects on physical abilities like Kick.
+- **Spell coefficients come from `SPELL_COEFFICIENTS`**, generated from the client's own spell data (the `SpellEffect` table, build 1.60.1.70450). They aren't derived from tooltips or formulas. Each spell is a list of `{ percent, kind }`, one per spell effect in `EffectIndex` order, e.g. `[133] = { { 42.9, "damage" }, { 0, "dot" } }`. The kind comes from `Effect`/`EffectAura`: `damage` (2), `heal` (10), `weapon` (7, 58, 64), `dot` (aura 3) and `hot` (aura 8). Show every part with its label, and never collapse them to one value. `weapon` parts are hidden, because they don't scale with spell power (Charge's 100%). The line says "Coefficient", not "spell power coefficient", because the data also gives 100% to `damage` effects on physical abilities like Kick.
 - **Per-tick / per-target labels** appear when a duration can't be found, or the effect hits several targets.
 - **English only.** `SUPPORTED_LOCALES` is enUS and enGB. Other locales leave tooltips untouched rather than show wrong numbers, and the report refuses to open.
 - **Don't guess.** When something can't be calculated honestly, show nothing rather than a misleading number.
@@ -92,7 +95,7 @@ The pipeline, top to bottom in the file:
 
 1. Get the exact text from the user: hover the spell in game and run `/ret debug`. It prints the parsed cast info (kind, seconds, cooldown), the coefficient and the normalized lines `Analyze` sees.
 2. Prefer a general wording rule (a pattern in `WeaponAmount`, `ClauseKind`, `UNIT_WORDS`, `AOE_PATTERNS` or `CONVERSION_PATTERNS`) over a name-keyed special case.
-3. Add it as a case to the harness below, and re-run every case to check for regressions.
+3. Add it as a case to the matching suite in `tests/` (usually `test_parser.lua`), and run `lua5.1 tests/run.lua` to check for regressions.
 4. Update the comments listing examples above the function you changed, since those comments are the catalogue of supported wordings.
 
 ## Regenerating the spell coefficients
@@ -107,75 +110,33 @@ The query reads the base tables directly (`SpellEffect` and `SpellClassOptions`)
 
 ## Testing outside the game
 
-There's no committed test suite. Write the harness as a `.lua` file in the session scratchpad, not the repo, and run it from the repo root with the installed interpreter.
-
-**Syntax check** every shipped file after an edit:
+The regression suite lives in `tests/` (never shipped). Run it after every change, from anywhere:
 
 ```sh
-for f in ResourceEfficiencyTooltips/*.lua; do luac5.1 -p "$f" && echo "ok $f"; done
+lua5.1 tests/run.lua          # every suite; exit code 1 if anything fails
+lua5.1 tests/test_parser.lua  # one suite
 ```
 
-**Parser tests** stub the WoW globals the main file touches at load time, load it with `assert(loadfile("ResourceEfficiencyTooltips/ResourceEfficiencyTooltips.lua"))("ResourceEfficiencyTooltips", ns)`, and call `ns.ComputeRatios({ ns.Normalize(text) }, cost, ns.Normalize(name))` or `ns.ComputeDPS`. Run it with `lua5.1 <scratchpad>/test.lua`:
+`run.lua` first compiles every `.lua` file the `.toc` lists, so new addon files are covered automatically. Then it runs each suite in its own interpreter, so one suite's stubs can't leak into another. The suites are:
 
-```lua
-MANA, RAGE, ENERGY = "Mana", "Rage", "Energy"
-MANA_COST, RAGE_COST, ENERGY_COST = "%d Mana", "%d Rage", "%d Energy"
-function GetLocale() return "enUS" end
-GameTooltip = { HookScript = function() end }
-SlashCmdList = {}
-function CreateFrame() return { RegisterEvent = function() end, SetScript = function() end } end
-function UnitDamage() return 90, 110 end            -- melee average 100
-function UnitRangedDamage() return 3, 80, 120 end    -- ranged average 100
-function UnitAttackPower() return 1000, 0, 0 end
-```
+| Suite | Covers |
+|---|---|
+| `test_parser.lua` | Per-point ratios, DPS, and cost and cast line reading (`ReadSpellTooltip`) |
+| `test_coefficients.lua` | The coefficient line: labels, ordering, settings, second pass, Shift redraws |
+| `test_notes.lua` | Forgone swing rage (Warrior, Bear Form), the Shift notes, Shift-only settings |
+| `test_macro.lua` | The `SetAction` hook for `#showtooltip` macros and their spell IDs |
 
-To test cost and cast line detection, fake a tooltip with `GetName`/`NumLines` and set `_G["FakeTipTextLeftN"]` (with `GetText`) and `_G["FakeTipTextRightN"]` (with `GetText` and `IsShown`, for cooldowns). To test the macro hook, also define `hooksecurefunc` (capture the function), `GameTooltip.SetAction`, `GetActionInfo` and `GetMacroSpell` before loading. To test the coefficient line, also load `SpellCoefficients.lua` with the same `ns`. Give the fake GameTooltip `AddLine`, `HookScript` (capture `OnTooltipCleared` and call it whenever you reset the lines) and `GetOwner`, and define `IsShiftKeyDown`. Capture the `CreateFrame` stub's `SetScript` handler so you can send it `MODIFIER_STATE_CHANGED`. `Report.lua` and `Config.lua` need a real client, so only syntax-check them.
+These files are the catalogue of supported wordings and their expected numbers, so never fix a test by changing what it expects unless the user agreed to the new behaviour. Add a case for every new wording or fix, in the suite that covers it. A new suite has to be added to `SUITES` in `run.lua`.
 
-If the native interpreter isn't available, the same Lua runs under Python's `lupa` (`python -m pip install --quiet --target <scratchpad>/pylibs lupa`, then `from lupa import lua51`).
+`helpers.lua` provides:
 
-Regression cases that passed (cost → expected damage per point, with 100 average weapon damage and 1000 attack power):
+- **WoW stubs:** 100 average melee and ranged damage, 1000 attack power, a Mage unless the suite changes it, enUS.
+- **A fake GameTooltip:** `T.show(rows, spellID)` runs the TooltipDataProcessor post-call and returns the lines joined with ` | `.
+- **Tooltip helpers:** `T.fakeTip` for `ReadSpellTooltip`, and `T.loadAddon()`, which loads the main file and `SpellCoefficients.lua` into a fresh `ns`.
+- **Checks:** `T.check` (equal), `T.has` (contains / doesn't contain) and `T.finish`.
+- **State a suite can change between cases:** `T.shift`, `T.class`, `T.weapon` (the main hand's tooltip lines), `T.owner`, `T.actions`, `T.macroSpells`. It can also read `T.events`, `T.hooks`, `T.onEvent` and `T.postCall`.
 
-| Spell | Cost | Expected | Covers |
-|---|---|---|---|
-| Arcane Blast (364 to 424) | 195 mana | 394/195 | stack limit isn't charges |
-| Frostbolt (18 to 20) | 25 mana | 0.76 | basic range |
-| Heroic Strike ("increases melee damage by 157") | 15 rage | 157/15 | next swing, bonus only |
-| Raptor Strike ("increases melee damage by 5") | 15 | 5/15 | next swing |
-| Maul ("next attack by 18 damage") | 15 rage | 18/15 | next swing |
-| Cleave ("weapon damage plus 5 … nearest ally") | 20 rage | 5/20, per target | `NEXT_SWING_SPELLS` |
-| Aimed Shot ("increases ranged damage by 70") | 75 | 170/75 | ranged strike |
-| Mortal Strike ("weapon damage plus 85") | 30 rage | 185/30 | instant strike |
-| Execute ("125 damage … each extra point of rage into 3") | 15 rage | 125/15 | conversion ignored |
-| Whirlwind ("weapon damage to each enemy") | 25 rage | 100/25, per target | AoE weapon |
-| Bloodthirst ("45% of your attack power") | 30 rage | 450/30 | attack power |
-| Rend ("15 damage over 9 sec") | 10 rage | 1.5 | damage over time |
-| Sinister Strike ("3 damage in addition to your normal weapon damage") | 45 energy | 103/45 | instant strike |
-| Backstab ("150% weapon damage plus 15") | 60 energy | 165/60 | percent strike |
-| Shred ("225% damage plus 54") | 60 energy | 279/60 | percent strike |
-| Claw ("110% normal damage plus 115") / old ("27 additional damage") | 45 energy | 225/45 / 127/45 | both wordings |
-| Rake ("19 damage and an additional 39 damage over 9 sec") | 40 energy | 58/40 | not a weapon strike |
-| Eviscerate (5 points: 30-34) | 35 energy | 32/35, 5 CP | finisher table |
-| Rupture (5 points: 136 damage over 16 secs) | 25 energy | 136/25, 5 CP | finisher damage over time |
-| Kidney Shot, Mana Burn | — | nothing | no false positives |
-
-DPS cases (`ns.ComputeDPS(lines, { kind, seconds, cooldown }, name, nil, resource)`):
-
-| Spell | Cast | Expected | Covers |
-|---|---|---|---|
-| Frostbolt (18 to 20) | 1.5 sec | 12.67 | basic |
-| Fireball (16 to 25 + 2 over 4 sec) | 1.5 sec | 20.5/1.5 + 2/4 = 14.17 | DoT at its own rate |
-| Flamestrike (120 + 80 over 8 sec, all enemies) | 3 sec | 50 per target | DoT refreshed by recasting |
-| 10 + 6 over 2 sec | 3 sec | 16/3 | DoT shorter than the cast lands in full |
-| Corruption (40 over 12 sec) | instant | 3.33 | DoT only |
-| Searing Totem (9 to 11, repeatedly, 30 sec) | instant | 130/30 | summon as DoT |
-| 5 every 3 sec, no duration | 2 sec | nothing | `dotUnknown` |
-| Smite (15 to 20) | 1.0 sec | 11.67 | GCD floor |
-| Arcane Explosion (32 to 36, all enemies) | instant, mana | 22.67 per target | instant uses 1.5 GCD |
-| Sinister Strike | instant, energy | 103 | 1 sec energy GCD |
-| Arcane Missiles (24 each second for 3 sec) | channeled | 24 | channel |
-| Blizzard (200 over 8 sec) | channeled | 25 per target | channel AoE |
-| Lightning Shield | instant | nothing | charges |
-| Mortal Strike (6 sec cooldown), Heroic Strike (next melee), Eviscerate | — | nothing | not repeatable |
+When the addon starts calling a new WoW API at load or tooltip time, add a stub to `helpers.lua`. `Report.lua` and `Config.lua` need a real client, so they're only compiled. The tests can't cover in-game behaviour (real tooltips, real APIs, the windows), so changes there still need the user to test in game.
 
 ## Known gaps
 
