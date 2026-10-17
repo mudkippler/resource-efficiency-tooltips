@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-**How much does each point of mana, rage or energy actually get you?** This addon adds the answer to the cost line of spell and ability tooltips, as well the damage per second to the cast time line. You can compare ranks and abilities at a glance without doing the math yourself.
+**How much does each point of mana, rage or energy actually get you?** This addon adds the answer to the cost line of spell and ability tooltips, as well the damage per second to the cast time line and the spell's coefficient at the bottom. You can compare ranks and abilities at a glance without doing the math yourself.
 
 ![image](https://media.forgecdn.net/attachments/description/1723554/description_554b66e5-35dd-4643-8756-fd4722196c50.png)
 
@@ -10,7 +10,9 @@
 
 **Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Damage over time counts at the rate it keeps ticking while you recast the spell. Recasting refreshes it rather than stacking it, so Flamestrike with 120 damage on impact, a 3 sec cast and 80 damage over 8 sec is 120 / 3 + 80 / 8 = 50 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
 
-**Choose what you see.** Type `/ret config` to turn the efficiency or the DPS part of the tooltip on or off.
+**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Spell coefficient: 42.9%`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts, such as impact damage and damage over time, list one value per part, e.g. `100% / 15%`.
+
+**Choose what you see.** Type `/ret config` to turn the efficiency, DPS or coefficient part of the tooltip on or off, and to choose whether coefficients need Shift.
 
 **Works on macros.** Macros that use `#showtooltip` show the same numbers as the spell itself.
 
@@ -40,7 +42,7 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
 **Doesn't guess.** Weapon imbues, Paladin seals, buffs that only change other damage or healing, and bonus damage from spare rage or energy are skipped, so you won't see misleading numbers.
 
-**Lightweight.** Two settings, saved per account, and nothing else.
+**Lightweight.** A few settings, saved per account, and nothing else.
 
 ## Commands
 
@@ -48,7 +50,7 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
 `/ret report` opens or closes the spellbook report.
 
-`/ret config` opens the settings window, where you can turn the efficiency and DPS parts of the tooltip on or off.
+`/ret config` opens the settings window, where you can turn the efficiency, DPS and coefficient parts of the tooltip on or off.
 
 ![image](https://media.forgecdn.net/attachments/description/1723554/description_3fdb5a7c-ca7d-4967-9a44-1a7ce9f478f1.png)
 
@@ -61,6 +63,8 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 **English clients only (enUS / enGB).** On other locales the addon turns itself off instead of showing wrong numbers.
 
 Values come from tooltip text. Talents, gear and buffs only count if the tooltip already includes them. The exception is weapon-based abilities, which use your current weapon damage and attack power.
+
+Spell coefficients come from a built-in table, not from the game, so spells missing from it show none. For spells with several parts, the values aren't labelled, because the source doesn't list the parts in a consistent order.
 
 DPS is the damage of casting a spell back to back. It doesn't account for running out of mana, rage or energy, or for your auto attacks.
 

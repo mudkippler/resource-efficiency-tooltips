@@ -15,6 +15,9 @@ local SUPPORTED_LOCALES = { enUS = true, enGB = true }
 -- be modified (or shown).
 local TOOLTIPS = { GameTooltip = true, ItemRefTooltip = true }
 
+-- Start of the line added at the bottom of spell tooltips for SPELL_COEFFICIENTS (SpellCoefficients.lua).
+local COEFFICIENT_LABEL = "Spell coefficient"
+
 local ORDER = { "damage", "heal", "absorb" }
 local LABELS = { damage = "dmg", heal = "heal", absorb = "absorb" }
 local COLORS = { damage = "ffff9040", heal = "ff40ff60", absorb = "ff80c8ff" }
@@ -565,9 +568,10 @@ local function GetDPSSuffix(lines, cast, resource, spellName)
     end)
 end
 
--- True if a line already carries one of our suffixes ("dmg/rage", "52.3 dps").
+-- True if a line is one we added or already carries one of our suffixes ("dmg/rage", "52.3 dps",
+-- "spell coefficient: 42.9%").
 local function IsAnnotated(text)
-    if text:find("%d dps") then return true end
+    if text:find("%d dps") or text:find(COEFFICIENT_LABEL, 1, true) then return true end
     for _, res in ipairs(RESOURCES) do
         for _, label in pairs(LABELS) do
             if text:find(label .. "/" .. res.key, 1, true) then return true end
@@ -647,45 +651,92 @@ local function GetCooldownFromAPI(spellID)
     return ok and type(ms) == "number" and ms / 1000 or nil
 end
 
+-- A spell's coefficients from SPELL_COEFFICIENTS as text: "42.9%", or "42.9% / 0%" for spells with
+-- several parts. Returns nil if the spell has no entry.
+local function FormatCoefficients(spellID)
+    local values = spellID and ns.SPELL_COEFFICIENTS[spellID]
+    if not values then return nil end
+    local parts = {}
+    for i, value in ipairs(values) do
+        parts[i] = format("%g%%", value)
+    end
+    return table.concat(parts, " / ")
+end
+
+-- True if a tooltip already has our coefficient line.
+local function HasCoefficientLine(tooltip, name)
+    for i = 1, tooltip:NumLines() do
+        local line = _G[name .. "TextLeft" .. i]
+        local text = line and line:GetText()
+        if text and not issecret(text) and text:find(COEFFICIENT_LABEL, 1, true) then return true end
+    end
+    return false
+end
+
 -- Settings; replaced by the saved variables on ADDON_LOADED.
-local DEFAULTS = { efficiency = true, dps = true }
+-- coefficientsShiftOnly: show the coefficient line only while Shift is held.
+local DEFAULTS = { efficiency = true, dps = true, coefficients = true, coefficientsShiftOnly = true }
 ns.db = {}
 for k, v in pairs(DEFAULTS) do ns.db[k] = v end
+
+-- GameTooltip while it shows a spell with a coefficient in Shift-only mode, so a Shift press can
+-- redraw it (RefreshForShift); cleared whenever the tooltip is cleared.
+local shiftTooltip
 
 local function Process(tooltip, spellID)
     if not tooltip or (tooltip.IsForbidden and tooltip:IsForbidden()) then return end
     local name = tooltip:GetName()
     if not name or not TOOLTIPS[name] then return end
 
-    local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
-    if not lines then return end
-
-    local titleLine = _G[name .. "TextLeft1"]
-    local spellName = titleLine and titleLine:GetText()
-    if spellName and issecret(spellName) then spellName = nil end
-    ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
-    spellName = spellName and Normalize(spellName)
-
     local changed = false
-    if ns.db.efficiency and costLine then
-        cost = cost or GetCostFromAPI(spellID, resource)
-        local suffix = cost and cost > 0 and GetSuffix(lines, cost, resource, spellName)
-        if suffix then
-            costLine:SetText(costLine:GetText() .. suffix)
+    local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
+    if lines then
+        local titleLine = _G[name .. "TextLeft1"]
+        local spellName = titleLine and titleLine:GetText()
+        if spellName and issecret(spellName) then spellName = nil end
+        ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
+        spellName = spellName and Normalize(spellName)
+
+        if ns.db.efficiency and costLine then
+            cost = cost or GetCostFromAPI(spellID, resource)
+            local suffix = cost and cost > 0 and GetSuffix(lines, cost, resource, spellName)
+            if suffix then
+                costLine:SetText(costLine:GetText() .. suffix)
+                changed = true
+            end
+        end
+        if ns.db.dps and cast then
+            if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
+            local suffix = GetDPSSuffix(lines, cast, resource, spellName)
+            if suffix then
+                cast.line:SetText(cast.line:GetText() .. suffix)
+                changed = true
+            end
+        end
+    end
+
+    -- The coefficient gets its own line at the bottom, below everything else.
+    local coefficients = ns.db.coefficients and FormatCoefficients(spellID)
+    if coefficients then
+        if ns.db.coefficientsShiftOnly and tooltip == GameTooltip then shiftTooltip = tooltip end
+        if (IsShiftKeyDown() or not ns.db.coefficientsShiftOnly) and not HasCoefficientLine(tooltip, name) then
+            tooltip:AddLine(format("%s: |cffffffff%s|r", COEFFICIENT_LABEL, coefficients), 0.5, 0.78, 1)
             changed = true
         end
     end
-    if ns.db.dps and cast then
-        if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
-        local suffix = GetDPSSuffix(lines, cast, resource, spellName)
-        if suffix then
-            cast.line:SetText(cast.line:GetText() .. suffix)
-            changed = true
-        end
-    end
+
     if changed and tooltip:IsShown() then
         tooltip:Show() -- resize to fit the longer lines
     end
+end
+
+-- Pressing or releasing Shift doesn't redraw a tooltip, so redraw it the way its owner does:
+-- Blizzard buttons through UpdateTooltip, other frames through OnEnter.
+local function RefreshForShift()
+    if not (shiftTooltip and shiftTooltip:IsShown()) then return end
+    local owner = shiftTooltip:GetOwner()
+    local refresh = owner and (owner.UpdateTooltip or owner:GetScript("OnEnter"))
+    if refresh then refresh(owner) end
 end
 
 -- For an action slot holding a macro, returns true and the spell its #showtooltip shows (nil if
@@ -726,6 +777,10 @@ if SUPPORTED_LOCALES[GetLocale()] and hooksecurefunc and GameTooltip.SetAction t
         local isMacro, spellID = GetMacroAction(slot)
         if isMacro then Process(self, spellID) end
     end)
+end
+
+if SUPPORTED_LOCALES[GetLocale()] then
+    GameTooltip:HookScript("OnTooltipCleared", function() shiftTooltip = nil end)
 end
 
 ns.Analyze = Analyze
@@ -787,18 +842,26 @@ SlashCmdList.RESOURCEEFFICIENCYTOOLTIPS = function(msg)
     if cast then
         print(format("  cast: %s, %s sec, cooldown %s", cast.kind, tostring(cast.seconds), tostring(cast.cooldown)))
     end
+    print("  coefficient: " .. (FormatCoefficients(last.id) or "none"))
     for i, line in ipairs(last.lines) do
         print(format("  %d: %s", i, line))
     end
 end
 
--- Loads the saved settings, then prints a startup line with the version from the .toc on login.
+-- Loads the saved settings, prints a startup line with the version from the .toc on login, and
+-- redraws the tooltip when Shift is pressed or released.
 local GetMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 local loginFrame = CreateFrame("Frame")
 loginFrame:RegisterEvent("ADDON_LOADED")
 loginFrame:RegisterEvent("PLAYER_LOGIN")
-loginFrame:SetScript("OnEvent", function(self, event, loadedName)
+loginFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+loginFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "MODIFIER_STATE_CHANGED" then
+        if arg1 == "LSHIFT" or arg1 == "RSHIFT" then RefreshForShift() end
+        return
+    end
     if event == "ADDON_LOADED" then
+        local loadedName = arg1
         if loadedName ~= addonName then return end
         self:UnregisterEvent("ADDON_LOADED")
         if type(ResourceEfficiencyTooltipsDB) ~= "table" then ResourceEfficiencyTooltipsDB = {} end

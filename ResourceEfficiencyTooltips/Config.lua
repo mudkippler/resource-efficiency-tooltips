@@ -9,10 +9,26 @@ local OPTIONS = {
     { key = "dps", label = "Damage per second",
         tip = "Damage per second of casting the spell back to back, on the cast time line. "
             .. "Only for spells without a cooldown." },
+    { key = "coefficients", label = "Spell coefficients",
+        tip = "The share of your spell power the spell gains, on a line at the bottom of the tooltip." },
+    -- parent: only available while that option is on, and indented under it.
+    { key = "coefficientsShiftOnly", label = "Only while Shift is held", parent = "coefficients",
+        tip = "Show spell coefficients only while you hold Shift. When off, they're always shown." },
 }
 
 local frame
 local checks = {}
+
+-- Greys out options whose parent option is off.
+local function UpdateEnabled()
+    for _, check in ipairs(checks) do
+        if check.parent then
+            local enabled = ns.db[check.parent] and true or false
+            check:SetEnabled(enabled)
+            check.label:SetFontObject(enabled and "GameFontHighlight" or "GameFontDisable")
+        end
+    end
+end
 
 local function CreateConfigFrame()
     frame = CreateFrame("Frame", "ResourceEfficiencyConfigFrame", UIParent, "BasicFrameTemplateWithInset")
@@ -37,7 +53,7 @@ local function CreateConfigFrame()
     for i, option in ipairs(OPTIONS) do
         local check = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
         check:SetSize(26, 26)
-        check:SetPoint("TOPLEFT", 14, -32 - (i - 1) * 28)
+        check:SetPoint("TOPLEFT", option.parent and 38 or 14, -32 - (i - 1) * 28)
         local label = check.Text or check.text
         if not label then
             label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -47,6 +63,7 @@ local function CreateConfigFrame()
         label:SetText(option.label)
         check:SetScript("OnClick", function(self)
             ns.db[option.key] = self:GetChecked() and true or false
+            UpdateEnabled()
         end)
         check:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -55,7 +72,7 @@ local function CreateConfigFrame()
             GameTooltip:Show()
         end)
         check:SetScript("OnLeave", GameTooltip_Hide or function() GameTooltip:Hide() end)
-        check.key = option.key
+        check.key, check.parent, check.label = option.key, option.parent, label
         checks[i] = check
     end
 
@@ -69,6 +86,7 @@ local function CreateConfigFrame()
         for _, check in ipairs(checks) do
             check:SetChecked(ns.db[check.key] and true or false)
         end
+        UpdateEnabled()
     end)
 end
 
