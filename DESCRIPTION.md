@@ -10,7 +10,7 @@
 
 **Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Damage over time counts at the rate it keeps ticking while you recast the spell. Recasting refreshes it rather than stacking it, so Flamestrike with 120 damage on impact, a 3 sec cast and 80 damage over 8 sec is 120 / 3 + 80 / 8 = 50 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
 
-**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Spell coefficient: 42.9%`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts, such as impact damage and damage over time, list one value per part, e.g. `100% / 15%`.
+**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Spell coefficient: 81.4% damage`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts list each one, e.g. Pyroblast's `100% damage / 15% over time`.
 
 **Choose what you see.** Type `/ret config` to turn the efficiency, DPS or coefficient part of the tooltip on or off, and to choose whether coefficients need Shift.
 
@@ -64,7 +64,7 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
 Values come from tooltip text. Talents, gear and buffs only count if the tooltip already includes them. The exception is weapon-based abilities, which use your current weapon damage and attack power.
 
-Spell coefficients come from a built-in table, not from the game, so spells missing from it show none. For spells with several parts, the values aren't labelled, because the source doesn't list the parts in a consistent order.
+Spell coefficients come from a built-in table taken from the game's spell data, so spells missing from it show none. Weapon damage isn't included, because it scales with your weapon rather than spell power.
 
 DPS is the damage of casting a spell back to back. It doesn't account for running out of mana, rage or energy, or for your auto attacks.
 

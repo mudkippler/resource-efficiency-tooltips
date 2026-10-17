@@ -18,6 +18,11 @@ local TOOLTIPS = { GameTooltip = true, ItemRefTooltip = true }
 -- Start of the line added at the bottom of spell tooltips for SPELL_COEFFICIENTS (SpellCoefficients.lua).
 local COEFFICIENT_LABEL = "Spell coefficient"
 
+-- How each kind of part in SPELL_COEFFICIENTS is labelled. "weapon" isn't listed: weapon damage
+-- scales with the weapon, not spell power (Charge's 100%), so those parts aren't shown. Neither are
+-- kinds added to the data later until they're given a label here.
+local COEFFICIENT_KINDS = { damage = "damage", heal = "healing", dot = "over time", hot = "over time" }
+
 local ORDER = { "damage", "heal", "absorb" }
 local LABELS = { damage = "dmg", heal = "heal", absorb = "absorb" }
 local COLORS = { damage = "ffff9040", heal = "ff40ff60", absorb = "ff80c8ff" }
@@ -651,15 +656,18 @@ local function GetCooldownFromAPI(spellID)
     return ok and type(ms) == "number" and ms / 1000 or nil
 end
 
--- A spell's coefficients from SPELL_COEFFICIENTS as text: "42.9%", or "42.9% / 0%" for spells with
--- several parts. Returns nil if the spell has no entry.
+-- A spell's coefficients from SPELL_COEFFICIENTS as text, one part per spell effect in the data's
+-- order: "81.4% damage", "42.9% damage / 0% over time". Parts without a COEFFICIENT_KINDS label are
+-- left out. Returns nil if the spell has no entry or nothing to show.
 local function FormatCoefficients(spellID)
-    local values = spellID and ns.SPELL_COEFFICIENTS[spellID]
-    if not values then return nil end
     local parts = {}
-    for i, value in ipairs(values) do
-        parts[i] = format("%g%%", value)
+    for _, part in ipairs(spellID and ns.SPELL_COEFFICIENTS[spellID] or {}) do
+        local percent, kind = part[1], COEFFICIENT_KINDS[part[2]]
+        if kind then
+            parts[#parts + 1] = format("%g%% %s", percent, kind)
+        end
     end
+    if #parts == 0 then return nil end
     return table.concat(parts, " / ")
 end
 

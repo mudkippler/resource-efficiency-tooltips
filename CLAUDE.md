@@ -1,6 +1,6 @@
 # Resource Efficiency Tooltips
 
-A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`, and a **spell coefficient** line at the bottom, e.g. `Spell coefficient: 42.9%`. `/ret config` toggles each part. It also has a `/ret report` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
+A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damage / healing / absorb **per point of mana, rage or energy** to the cost line of spell tooltips, e.g. `15 Rage  (10.5 dmg/rage)`, **damage per second** to the cast time line, e.g. `1.5 sec cast  (12.7 dps)`, and a **spell coefficient** line at the bottom, e.g. `Spell coefficient: 42.9% damage / 0% over time`. `/ret config` toggles each part. It also has a `/ret report` spellbook report listing every spell and rank by efficiency. It's published on CurseForge by the author (tehraiden).
 
 ## Target client: WoW Forever only, no backwards compatibility
 
@@ -15,10 +15,14 @@ A World of Warcraft **Forever** addon (`## Interface: 16001`) that appends damag
 
 ```
 CLAUDE.md, DESCRIPTION.md, LICENSE, icon.png, *.zip   <- repo root: never shipped
+scripts/                                      <- dev scripts (never shipped)
+    Install-Addon.ps1                         <- copies the addon into the Forever beta client
+    generate_spell_coefficients.py            <- regenerates SpellCoefficients.lua from the database
+data/<date>/                                  <- spell database snapshot (spelldb.db, CSVs) and its SQL
 ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zipped for CurseForge
     ResourceEfficiencyTooltips.toc
     ResourceEfficiencyTooltips.lua            <- parser, tooltip hook, slash commands, startup line
-    SpellCoefficients.lua                     <- ns.SPELL_COEFFICIENTS: spell ID -> list of coefficient percents (data)
+    SpellCoefficients.lua                     <- ns.SPELL_COEFFICIENTS (generated; don't edit by hand)
     Report.lua                                <- /ret report spellbook report window
     Config.lua                                <- /ret config settings window (checkboxes)
     icon.tga                                  <- addon-list icon (64x64, 32-bit TGA with alpha)
@@ -30,6 +34,7 @@ ResourceEfficiencyTooltips/                   <- the addon: EXACTLY what gets zi
 - **Version** lives only in the `.toc` (`## Version:`). The startup chat line reads it via `GetAddOnMetadata`, so a bump is a one-line `.toc` change.
 - **New `.lua` files** must be added to the `.toc` file list, after `ResourceEfficiencyTooltips.lua`, because `Report.lua` and `Config.lua` depend on what the main file puts on `ns`. `SpellCoefficients.lua` comes straight after the main file.
 - **`## SavedVariables: ResourceEfficiencyTooltipsDB`** in the `.toc` holds the settings. Changing the `.toc` needs a full game restart, not `/reload`.
+- **Installing for testing:** `powershell -ExecutionPolicy Bypass -File scripts\Install-Addon.ps1` replaces `Interface\AddOns\ResourceEfficiencyTooltips` in the Forever beta client (`C:\Program Files (x86)\World of Warcraft\_classic_beta_`, build 1.60.1.70450; `-GameDir` for another client) with an exact copy of the addon folder. `_beta_` is a different client. The game copy is a plain copy, not a link, so re-run the script after every change.
 - **`IconTexture`** in the `.toc` points at `icon` with no extension; WoW resolves `icon.tga`. WoW textures need power-of-two sizes, and PNG isn't relied on.
 
 ## Environment
@@ -58,7 +63,7 @@ The pipeline, top to bottom in the file:
 5. **`ComputeRatios`** gives total ÷ cost per kind. For absorbs, `ParseAbsorbDrain` adds Mana Shield's drain to the cost.
 6. **`ComputeDPS`** is damage ÷ max(cast time, GCD). The GCD is 1 sec for energy and 1.5 sec otherwise. It returns nil when there's a cooldown (tooltip text, or `GetSpellBaseCooldown` as a backstop in `Process`), for next-swing abilities and for finishers. Normal casts add `direct` ÷ time per cast to each entry in `dots` at total ÷ max(its duration, time per cast). Recasting refreshes a DoT rather than stacking it, so Flamestrike (120 on impact, 3 sec cast, 80 over 8 sec) is 120/3 + 80/8 = 50. A DoT with no duration (`dotUnknown`) means no DPS. Charges count towards neither. Channels use the full total over `duration`.
 7. **`GetSuffix` / `GetDPSSuffix`** build the coloured suffixes and cache them through `Cached` in a 200-entry FIFO, keyed on cost or cast info, resource, name, combat stats and lines. Action-button tooltips refresh several times a second, so the cache matters. `Process` applies each suffix only if its `ns.db` setting is on.
-8. **Coefficient line.** After the suffixes, `Process` adds `Spell coefficient: …` (`COEFFICIENT_LABEL`) as the tooltip's last line via `AddLine`. It runs even when the tooltip has no cost or cast line. The values come from `FormatCoefficients(spellID)` (`%g%%`, joined with ` / `), so there's no line without a spell ID. `HasCoefficientLine` and `IsAnnotated` (which also matches the label) stop a second pass from adding it twice. In Shift-only mode, `Process` remembers GameTooltip in `shiftTooltip` (cleared by `OnTooltipCleared`). `MODIFIER_STATE_CHANGED` for LSHIFT/RSHIFT then calls `RefreshForShift`, which redraws the tooltip through its owner's `UpdateTooltip` or `OnEnter`. ItemRefTooltip gets the line, but isn't redrawn on Shift.
+8. **Coefficient line.** After the suffixes, `Process` adds `Spell coefficient: …` (`COEFFICIENT_LABEL`) as the tooltip's last line via `AddLine`. It runs even when the tooltip has no cost or cast line. The text comes from `FormatCoefficients(spellID)`: each `{ percent, kind }` part as `%g%%` plus its `COEFFICIENT_KINDS` label, joined with ` / ` (`42.9% damage / 0% over time`). Parts whose kind has no label (`weapon`, or anything new) are skipped, and so is the whole line if nothing is left, or there's no spell ID. `HasCoefficientLine` and `IsAnnotated` (which also matches the label) stop a second pass from adding it twice. In Shift-only mode, `Process` remembers GameTooltip in `shiftTooltip` (cleared by `OnTooltipCleared`). `MODIFIER_STATE_CHANGED` for LSHIFT/RSHIFT then calls `RefreshForShift`, which redraws the tooltip through its owner's `UpdateTooltip` or `OnEnter`. ItemRefTooltip gets the line, but isn't redrawn on Shift.
 
 `Analyze` returns a table (`totals`, `perTick`, `aoe`, `direct`, `directAoe`, `dots`, `dotUnknown`, `absorbDrain`, `comboPoints`, `duration`). `TickMultiplier` also returns each over-time clause's duration.
 
@@ -77,7 +82,7 @@ The pipeline, top to bottom in the file:
 - **Conversions are ignored** (`CONVERSION_PATTERNS`): Mana Burn's per-mana damage and Execute's per-extra-rage damage.
 - **"Stacks up to N times" is not charges.** This was the Arcane Blast bug.
 - **DPS only for spells cast back to back:** no cooldown, not next-swing, not a finisher. Instants use the GCD. Damage over time counts at its sustained rate while spamming (total ÷ max(duration, time per cast)), because recasting refreshes it rather than stacking it. Channels count everything over the channel. AoE is per target. DPS doesn't model resource limits or auto attacks.
-- **Spell coefficients come from `SPELL_COEFFICIENTS`**, data the user downloaded from an external source, keyed by spell ID. It isn't derived from tooltips or formulas. The source repeats IDs for spells with several parts, in an inconsistent order (Fireball 42.9 then 0, Immolate 13 then 20), so every distinct value is kept in source order and shown unlabelled (`42.9% / 0%`). Never collapse them to one value, and never label them direct or DoT without a source that says which is which. The label is "Spell coefficient", not "spell power coefficient", because the source gives 100% to physical abilities like Kick and Charge.
+- **Spell coefficients come from `SPELL_COEFFICIENTS`**, generated from the client's own spell data (the `SpellEffect` table, build 1.60.1.70450). They aren't derived from tooltips or formulas. Each spell is a list of `{ percent, kind }`, one per spell effect in `EffectIndex` order, e.g. `[133] = { { 42.9, "damage" }, { 0, "dot" } }`. The kind comes from `Effect`/`EffectAura`: `damage` (2), `heal` (10), `weapon` (7, 58, 64), `dot` (aura 3) and `hot` (aura 8). Show every part with its label, and never collapse them to one value. `weapon` parts are hidden, because they don't scale with spell power (Charge's 100%). The line says "Spell coefficient", not "spell power coefficient", because the data also gives 100% to `damage` effects on physical abilities like Kick.
 - **Per-tick / per-target labels** appear when a duration can't be found, or the effect hits several targets.
 - **English only.** `SUPPORTED_LOCALES` is enUS and enGB. Other locales leave tooltips untouched rather than show wrong numbers, and the report refuses to open.
 - **Don't guess.** When something can't be calculated honestly, show nothing rather than a misleading number.
@@ -89,6 +94,16 @@ The pipeline, top to bottom in the file:
 2. Prefer a general wording rule (a pattern in `WeaponAmount`, `ClauseKind`, `UNIT_WORDS`, `AOE_PATTERNS` or `CONVERSION_PATTERNS`) over a name-keyed special case.
 3. Add it as a case to the harness below, and re-run every case to check for regressions.
 4. Update the comments listing examples above the function you changed, since those comments are the catalogue of supported wordings.
+
+## Regenerating the spell coefficients
+
+`python scripts/generate_spell_coefficients.py` (optionally `--data data/<date>`; the default is the newest folder) does the following:
+
+- Runs `SELECT_RET_SPELL_DATA_AS_LUA.sql` from the data folder against its `spelldb.db`. The database is opened read-only, so it's safe while a database browser has it open.
+- Writes `SpellCoefficients.lua` with a header giving the generation time and source.
+- Checks the result with `luac5.1 -p` before replacing the old file.
+
+The query reads the base tables directly (`SpellEffect` and `SpellClassOptions`, plus `SpellName` for a trailing name comment), not the `RET_SPELL_DATA` view. It also filters `DifficultyID = 0`, because some spells have raid-difficulty copies of the same effect (Flame Spear, Blast Wave). The SQL files in `data/` use CRLF line endings, unlike the addon. To change the data, change the query and re-run the script; never edit `SpellCoefficients.lua` by hand.
 
 ## Testing outside the game
 
@@ -172,7 +187,7 @@ DPS cases (`ns.ComputeDPS(lines, { kind, seconds, cooldown }, name, nil, resourc
 - The exact Forever cast and cooldown line wording ("Instant", "Channeled", "N sec cooldown") is assumed from Classic. Check `/ret debug`, which prints the parsed cast info.
 - Mana, rage and energy share one sorted list in the report even though their points aren't comparable. This is accepted and documented in `DESCRIPTION.md`.
 - Macros whose `#showtooltip` shows an item, or no spell, get no numbers.
-- Coefficients only exist for spell IDs in `SPELL_COEFFICIENTS`. There's no formula fallback, and the values aren't used in the efficiency or DPS numbers. The parts of multi-part spells aren't labelled (see Design decisions). If the user regenerates the data file from the source, it must keep the `[id] = { a, b }` list format, not one `[id] = "a%"` line per part, where duplicate keys silently keep only the last value.
+- Coefficients only exist for spell IDs in `SPELL_COEFFICIENTS`. There's no formula fallback, and the values aren't used in the efficiency or DPS numbers.
 - Shift redraws GameTooltip only. A chat-linked spell (ItemRefTooltip) shows the coefficient only if Shift was held when it opened, or in always mode.
 
 ## Conventions
