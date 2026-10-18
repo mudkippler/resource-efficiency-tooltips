@@ -625,13 +625,20 @@ end
 -- Damage per second of casting a spell back to back. Only for spells that can be: no cooldown,
 -- not a next-swing ability, not a combo point finisher. A cast takes its cast time, but never
 -- less than the global cooldown (so instants use the GCD).
--- Normal casts: impact damage / time per cast. A spell with damage over time shows only the DPS of
--- the applied effect instead, total / (cast time + its duration), since it only starts ticking once
--- the cast ends, and its impact damage isn't counted: Immolate (11 on impact, 2 sec cast, 20 over
--- 15 sec) is 20/17, and instant Corruption (40 over 12 sec) is 40/12. Instants don't add the GCD.
+-- Normal casts are rated one of two ways, depending on how much of their damage is over time:
+-- * Mostly damage over time (more than DOT_DPS_SHARE of it): only the DPS of the applied effect,
+--   total / (cast time + its duration), since it only starts ticking once the cast ends, and the
+--   impact damage isn't counted. Immolate (11 on impact, 2 sec cast, 20 over 15 sec) is 20/17, and
+--   instant Corruption (40 over 12 sec) is 40/12. Instants don't add the GCD.
+-- * Otherwise, casting it back to back: impact damage / time per cast, plus each damage-over-time
+--   effect at the rate it keeps ticking while recast: total / max(its duration, time per cast).
+--   Recasting refreshes the effect rather than stacking it, so Fireball (20.5 on impact, 1.5 sec
+--   cast, 2 over 4 sec) is 20.5/1.5 + 2/4, and Flamestrike (120 on impact, 3 sec cast, 80 over
+--   8 sec) is 120/3 + 80/8 = 50; a DoT shorter than the cast time lands in full every cast.
 -- Channels: everything they do over the channel.
 -- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
 -- Returns { dps, aoe, notes } or nil (notes as in ComputeRatios).
+local DOT_DPS_SHARE = 0.45
 local function ComputeDPS(lines, cast, spellName, stats, resource)
     if not cast or cast.kind == "nextswing" or (cast.cooldown and cast.cooldown > 0) then return nil end
     local a = Analyze(lines, spellName, stats or GetCombatStats())
@@ -643,25 +650,34 @@ local function ComputeDPS(lines, cast, spellName, stats, resource)
         return { dps = damage / math.max(seconds, gcd), aoe = a.aoe.damage, notes = {} }
     end
     if a.dotUnknown.damage then return nil end
-    local dots = a.dots.damage
-    if not dots then
-        local dps = (a.direct.damage or 0) / math.max(cast.seconds or 0, gcd)
-        if dps <= 0 then return nil end
-        return { dps = dps, aoe = a.directAoe.damage, notes = {} }
-    end
-    local dps, isAoE = 0, false
+    local direct, dots = a.direct.damage or 0, a.dots.damage or {}
+    local dotTotal = 0
+    for _, dot in ipairs(dots) do dotTotal = dotTotal + dot.total end
+    if dotTotal + direct <= 0 then return nil end
     local castTime = cast.seconds or 0
-    for _, dot in ipairs(dots) do
-        dps = dps + dot.total / (castTime + dot.duration)
-        isAoE = isAoE or dot.aoe
-    end
-    if dps <= 0 then return nil end
-    local notes = {}
-    if a.direct.damage then
-        notes[1] = "DPS is the damage over time effect alone: its total over the cast time plus its duration. "
-            .. "The initial damage isn't counted."
-    elseif castTime > 0 then
-        notes[1] = "DPS is the damage over time effect's total over the cast time plus its duration."
+    local dps, isAoE, notes = 0, false, {}
+    if dotTotal / (dotTotal + direct) > DOT_DPS_SHARE then
+        for _, dot in ipairs(dots) do
+            dps = dps + dot.total / (castTime + dot.duration)
+            isAoE = isAoE or dot.aoe
+        end
+        if direct > 0 then
+            notes[1] = "Most of the damage is over time, so DPS is that effect alone: its total over the cast "
+                .. "time plus its duration. The initial damage isn't counted."
+        elseif castTime > 0 then
+            notes[1] = "DPS is the damage over time effect's total over the cast time plus its duration."
+        end
+    else
+        local seconds = math.max(castTime, gcd)
+        dps, isAoE = direct / seconds, a.directAoe.damage or false
+        for _, dot in ipairs(dots) do
+            dps = dps + dot.total / math.max(dot.duration, seconds)
+            isAoE = isAoE or dot.aoe
+        end
+        if #dots > 0 then
+            notes[1] = "DPS counts damage over time at the rate it ticks while you keep recasting, because "
+                .. "recasting refreshes it rather than stacking it."
+        end
     end
     return { dps = dps, aoe = isAoE, notes = notes }
 end

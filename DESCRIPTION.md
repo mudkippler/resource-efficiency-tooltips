@@ -8,7 +8,7 @@
 
 **Damage/Healing per Mana/Energy/Rage**: Self explanatory.
 
-**Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Spells with damage over time show the DPS of that effect alone: its total damage over the cast time plus its duration, since it only starts ticking once the cast finishes. Any damage on impact isn't counted, so Immolate with 11 damage on impact, a 2 sec cast and 20 damage over 15 sec shows 20 / (2 + 15) = 1.2 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
+**Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Spells that do more than 45% of their damage over time show the DPS of that effect alone: its total damage over the cast time plus its duration, since it only starts ticking once the cast finishes. Any damage on impact isn't counted, so Immolate with 11 damage on impact, a 2 sec cast and 20 damage over 15 sec shows 20 / (2 + 15) = 1.2 DPS. Other spells count their damage over time at the rate it keeps ticking while you recast them, because recasting refreshes it rather than stacking it. So Flamestrike with 120 damage on impact, a 3 sec cast and 80 damage over 8 sec is 120 / 3 + 80 / 8 = 50 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
 
 **Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Coefficient: 81.4%`. It's always shown by default, or you can have it show only while you hold Shift. Spells with several parts list each one, direct part first, e.g. Pyroblast's `100% Direct / 15% DoT`. Channeled spells like Arcane Missiles show the coefficient of each missile or tick.
 
@@ -72,7 +72,7 @@ Values come from tooltip text. Talents, gear and buffs only count if the tooltip
 
 Spell coefficients come from a built-in table taken from the game's spell data, so spells missing from it show none. Weapon damage isn't included, because it scales with your weapon rather than spell power.
 
-DPS is the damage of casting a spell back to back, or for damage over time spells, of one application of the effect. It doesn't account for running out of mana, rage or energy, or for your auto attacks.
+DPS is the damage of casting a spell back to back, or for spells that mostly do damage over time, of one application of the effect. It doesn't account for running out of mana, rage or energy, or for your auto attacks.
 
 Mana, rage and energy share one list in the report, but a point of one isn't worth the same as a point of another. Compare within a resource for the fairest picture.
 

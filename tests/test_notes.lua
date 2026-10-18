@@ -76,7 +76,8 @@ T.has("Shift down: no key", shown, nil, "shift:16:32")
 T.shift = false
 T.has("Frostbolt: no notes, no key", T.show({ "Frostbolt", "25 Mana", "1.5 sec cast", "Launches a bolt of frost, causing 18 to 20 Frost damage." }), nil, "shift:16:32")
 T.shift = true
-T.has("Fireball: DoT DPS note", T.show(FIREBALL), "DPS is the damage over time effect alone: its total over the cast time plus its duration. The initial damage isn't counted.")
+T.has("Fireball: DoT DPS note", T.show(FIREBALL), "DPS counts damage over time at the rate it ticks while you keep recasting")
+T.has("Immolate: mostly-DoT note", T.show({ "Immolate", "25 Mana", "2 sec cast", "Burns the enemy for 11 Fire damage and then an additional 20 Fire damage over 15 sec." }), "Most of the damage is over time, so DPS is that effect alone")
 T.has("Mortal Strike: weapon note", T.show({ "Mortal Strike", "30 Rage", "Instant", "A vicious strike that deals weapon damage plus 85." }), "Uses your current main-hand weapon damage (100 average).")
 T.has("Bloodthirst: attack power note", T.show({ "Bloodthirst", "30 Rage", "Instant", "Instantly attack the target causing damage equal to 45% of your attack power." }), "Uses your current attack power (1000).")
 T.has("Execute: conversion note", T.show({ "Execute", "15 Rage", "Instant", "Attempt to finish off a wounded foe, causing 125 damage and converting each extra point of rage into 3 additional damage." }), "Extra damage from spending more than the cost isn't counted.")
