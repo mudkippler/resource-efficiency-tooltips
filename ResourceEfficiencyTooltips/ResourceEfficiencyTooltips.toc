@@ -2,7 +2,7 @@
 ## Title: Resource Efficiency Tooltips
 ## Notes: Shows damage, healing or absorb per point of mana, rage or energy, damage per second and spell coefficients in spell tooltips.
 ## Author: tehraiden
-## Version: 0.1.5
+## Version: 0.2.0
 ## IconTexture: Interface\AddOns\ResourceEfficiencyTooltips\icon
 ## SavedVariables: ResourceEfficiencyTooltipsDB
 
