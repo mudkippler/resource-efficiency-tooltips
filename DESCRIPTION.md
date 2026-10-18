@@ -10,11 +10,11 @@
 
 **Damage per second** for spells you can cast back to back: average damage divided by the cast time. Instant spells use the global cooldown (1 sec for energy abilities, 1.5 sec otherwise), and casts faster than the global cooldown are rounded up to it. It's only shown for spells without a cooldown, and not for finishers or next-swing abilities like Heroic Strike. Spells with damage over time show the DPS of that effect alone: its total damage over the cast time plus its duration, since it only starts ticking once the cast finishes. Any damage on impact isn't counted, so Immolate with 11 damage on impact, a 2 sec cast and 20 damage over 15 sec shows 20 / (2 + 15) = 1.2 DPS. Channeled spells (Arcane Missiles, Blizzard) count their full damage over the channel. AoE spells show DPS _per target_.
 
-**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Coefficient: 81.4%`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts list each one, direct part first, e.g. Pyroblast's `100% Direct / 15% DoT`.
+**Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Coefficient: 81.4%`. It's always shown by default, or you can have it show only while you hold Shift. Spells with several parts list each one, direct part first, e.g. Pyroblast's `100% Direct / 15% DoT`. Channeled spells like Arcane Missiles show the coefficient of each missile or tick.
 
 **Shows what stat-scaled bonuses are worth.** When a spell's description scales with your stats, the current value is filled in: Arcane Wrath's "5% (612) of your maximum Mana" and Arcane Blast's "15% (45) of your Intellect". These bonuses aren't added to the efficiency or DPS numbers, which use the spell's listed damage.
 
-**Choose what you see.** Type `/ret config` to turn each part of the tooltip on or off (efficiency, DPS, coefficients and additional info) and to choose whether each one only shows while you hold Shift. By default coefficients and additional info need Shift, and the rest is always shown.
+**Choose what you see.** Type `/ret config` to turn each part of the tooltip on or off (efficiency, DPS, coefficients and additional info) and to choose whether each one only shows while you hold Shift. By default only the additional info needs Shift, and the rest is always shown.
 
 **Works on macros.** Macros that use `#showtooltip` show the same numbers as the spell itself.
 

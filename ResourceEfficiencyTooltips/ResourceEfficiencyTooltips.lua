@@ -830,11 +830,22 @@ local PARTS = { "efficiency", "dps", "coefficients", "notes" }
 local DEFAULTS = {
     efficiency = true, efficiencyShiftOnly = false,
     dps = true, dpsShiftOnly = false,
-    coefficients = true, coefficientsShiftOnly = true,
+    coefficients = true, coefficientsShiftOnly = false,
     notes = true, notesShiftOnly = true,
 }
+-- Bumped when a saved setting has to change for everyone; see MigrateSettings.
+local SETTINGS_VERSION = 2
 ns.db = {}
 for k, v in pairs(DEFAULTS) do ns.db[k] = v end
+
+-- Updates saved settings from an older version. Every default is saved on load, so a changed
+-- default never reaches existing users by itself.
+-- 2: coefficients no longer need Shift by default (up to 0.1.4 they did).
+local function MigrateSettings(db)
+    local version = db.settingsVersion or 1
+    if next(db) ~= nil and version < 2 then db.coefficientsShiftOnly = false end
+    db.settingsVersion = SETTINGS_VERSION
+end
 
 -- True if a part is on, and Shift is held when it's Shift-only. Only GameTooltip is redrawn when
 -- Shift changes, and Shift-clicking a chat link usually puts it in chat instead of opening it, so
@@ -1112,6 +1123,7 @@ loginFrame:SetScript("OnEvent", function(self, event, arg1)
         if loadedName ~= addonName then return end
         self:UnregisterEvent("ADDON_LOADED")
         if type(ResourceEfficiencyTooltipsDB) ~= "table" then ResourceEfficiencyTooltipsDB = {} end
+        MigrateSettings(ResourceEfficiencyTooltipsDB)
         for k, v in pairs(DEFAULTS) do
             if ResourceEfficiencyTooltipsDB[k] == nil then ResourceEfficiencyTooltipsDB[k] = v end
         end

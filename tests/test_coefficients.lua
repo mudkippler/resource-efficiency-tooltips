@@ -7,6 +7,11 @@ local ns = T.loadAddon()
 local FIREBALL = { "Fireball", "30 Mana", "1.5 sec cast", "Hurls a fiery ball that causes 16 to 25 Fire damage and an additional 2 Fire damage over 4 sec." }
 local function Show(spellID, rows) return T.show(rows or FIREBALL, spellID) end
 
+T.has("default: shown without Shift", Show(133), "| Coefficient: |cffffffff42.9% Direct / 0% DoT|r")
+T.has("Arcane Missiles: the triggered missile's coefficient", Show(5143), "Coefficient: |cffffffff28.6%|r")
+T.has("Penance (heal): the triggered heal's coefficient", Show(402277), "Coefficient: |cffffffff19%|r")
+
+ns.db.coefficientsShiftOnly = true
 T.has("Shift-only, Shift up: no line", Show(133), "dmg/mana", "Coefficient:")
 -- A chat link (ItemRefTooltip) isn't redrawn when Shift changes, so Shift-only parts show anyway.
 local link = T.show(FIREBALL, 133, ItemRefTooltip)
@@ -60,5 +65,23 @@ T.setTip({ "Linen Cloth", "Trade Goods" })
 T.onEvent(nil, "MODIFIER_STATE_CHANGED", "LSHIFT", 1)
 T.check("no redraw once the tooltip shows an item", redraws, 2)
 T.owner = nil
+
+-- Saved settings: up to 0.1.4 coefficients needed Shift by default, and every default is saved,
+-- so ADDON_LOADED turns it off once for existing users and then leaves their choice alone.
+local frame = { UnregisterEvent = function() end }
+local function Load(saved)
+    ResourceEfficiencyTooltipsDB = saved
+    T.onEvent(frame, "ADDON_LOADED", "ResourceEfficiencyTooltips")
+    return ResourceEfficiencyTooltipsDB
+end
+local db = Load({ efficiency = true, coefficients = true, coefficientsShiftOnly = true, notesShiftOnly = true })
+T.check("old settings: coefficients no longer Shift-only", db.coefficientsShiftOnly, false)
+T.check("old settings: notes keep their Shift setting", db.notesShiftOnly, true)
+T.check("old settings: version saved", db.settingsVersion, 2)
+db = Load({ coefficientsShiftOnly = true, settingsVersion = 2 })
+T.check("current settings: Shift-only kept", db.coefficientsShiftOnly, true)
+db = Load(nil)
+T.check("new install: default", db.coefficientsShiftOnly, false)
+T.check("new install: version saved", db.settingsVersion, 2)
 
 T.finish()
