@@ -5,7 +5,7 @@ local T = dofile((arg[0]:match("^(.*)[/\\]") or ".") .. "/helpers.lua")
 local ns = T.loadAddon()
 ns.db.coefficients = false -- keep the coefficient line out of these tooltips
 
-local ICON = "|TInterface\\CharacterFrame\\UI-StateIcon:0:0:0:0:64:64:32:64:0:31|t"
+local ICON = "|TInterface\\CharacterFrame\\UI-StateIcon:18:18:0:0:64:64:32:64:0:31|t"
 local SUFFIX = "  (" .. ICON .. ")"
 local NOTE = "Something this needs is hidden during combat, so it shows again after combat."
 

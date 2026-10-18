@@ -25,8 +25,9 @@ local STAT_VALUE_COLOR = "ff6fc3ff"
 
 -- Shown in brackets wherever a number can't be calculated because something it depends on is a
 -- secret value, as stats and tooltip text can be in combat: the player frame's crossed swords
--- (UI-StateIcon's combat half). Only used for that, so IsAnnotated can recognise it.
-local SECRET_ICON = "|TInterface\\CharacterFrame\\UI-StateIcon:0:0:0:0:64:64:32:64:0:31|t"
+-- (UI-StateIcon's combat half), 18x18: half again the tooltip text's ~12px. Only used for that, so
+-- IsAnnotated can recognise it.
+local SECRET_ICON = "|TInterface\\CharacterFrame\\UI-StateIcon:18:18:0:0:64:64:32:64:0:31|t"
 local SECRET_SUFFIX = "  (" .. SECRET_ICON .. ")"
 local SECRET_NOTE = "Something this needs is hidden during combat, so it shows again after combat."
 
