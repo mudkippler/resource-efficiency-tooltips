@@ -14,7 +14,7 @@ local PARTS = {
         tip = "The share of your spell power the spell gains, on a line at the bottom of the tooltip." },
     { key = "notes", label = "Additional info", name = "the additional info",
         tip = "Explains numbers worked out in a way that isn't obvious, such as Heroic Strike's rage. "
-            .. "In Shift-only mode, a \"Hold Shift for additional info\" line shows until you do." },
+            .. "In Shift-only mode, a small Shift key shows next to the numbers until you do." },
 }
 
 -- parent: only available while that option is on, and indented under it.

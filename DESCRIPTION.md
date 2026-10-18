@@ -42,7 +42,7 @@ Heroic Strike, Cleave and Maul also count the rage the empowered swing doesn't g
 
 Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
-**Hold Shift for the details.** Abilities with a calculation that isn't obvious, such as Heroic Strike's rage, show "Hold Shift for additional info". Hold Shift to see how the number was worked out.
+**Hold Shift for the details.** Abilities with a calculation that isn't obvious, such as Heroic Strike's rage, show a small Shift key next to their numbers. Hold Shift to see how the number was worked out.
 
 **Clear labels for special cases.** AoE abilities are marked _per target_, and effects with no fixed duration are marked _per tick_.
 

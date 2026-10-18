@@ -59,15 +59,23 @@ T.class = "WARRIOR"
 ---------------------------------------------------------------------------
 
 local HEROIC_STRIKE = { "Heroic Strike", "15 Rage", "Next melee", HS }
+-- The Shift keycap shown instead of the notes until Shift is held.
+local KEY = [[ |TInterface\AddOns\ResourceEfficiencyTooltips\shift:16:32|t]]
 local FIREBALL = { "Fireball", "30 Mana", "1.5 sec cast", "Hurls a fiery ball that causes 16 to 25 Fire damage and an additional 2 Fire damage over 4 sec." }
 
-T.has("Shift up: hint, no notes", T.show(HEROIC_STRIKE), "| Hold Shift for additional info", "generates no rage")
+T.has("Shift up: key after the efficiency suffix when there's no DPS", T.show(HEROIC_STRIKE), "dmg/rage|r)" .. KEY .. " | Next melee", "generates no rage")
+T.has("Shift up: key after the DPS suffix, outside the brackets", T.show(FIREBALL), "dps|r)" .. KEY .. " | Hurls")
+local fbUp = T.show(FIREBALL)
+T.has("Shift up: only one key (not on the cost line too)", fbUp, "dmg/mana|r) | 1.5 sec", "dmg/mana|r)" .. KEY)
+T.has("Shift up: no hint line", T.show(HEROIC_STRIKE), nil, "Hold Shift")
 T.shift = true
 local shown = T.show(HEROIC_STRIKE)
 T.has("Shift down: bonus note", shown, "Only the bonus damage counts, because the swing would have hit anyway.")
 T.has("Shift down: rage note", shown, "The empowered swing generates no rage, so the 9.0 rage it would have given (2.60 speed, one-handed) counts as cost too: 15 + 9.0 rage.")
-T.has("Shift down: no hint", shown, nil, "Hold Shift")
-T.has("Frostbolt: no notes", T.show({ "Frostbolt", "25 Mana", "1.5 sec cast", "Launches a bolt of frost, causing 18 to 20 Frost damage." }), nil, "Hold Shift")
+T.has("Shift down: no key", shown, nil, "shift:16:32")
+T.shift = false
+T.has("Frostbolt: no notes, no key", T.show({ "Frostbolt", "25 Mana", "1.5 sec cast", "Launches a bolt of frost, causing 18 to 20 Frost damage." }), nil, "shift:16:32")
+T.shift = true
 T.has("Fireball: DoT DPS note", T.show(FIREBALL), "DPS counts damage over time at the rate it ticks while you keep recasting")
 T.has("Mortal Strike: weapon note", T.show({ "Mortal Strike", "30 Rage", "Instant", "A vicious strike that deals weapon damage plus 85." }), "Uses your current main-hand weapon damage (100 average).")
 T.has("Bloodthirst: attack power note", T.show({ "Bloodthirst", "30 Rage", "Instant", "Instantly attack the target causing damage equal to 45% of your attack power." }), "Uses your current attack power (1000).")
@@ -82,11 +90,11 @@ T.shift = false
 -- Shift-only settings
 ---------------------------------------------------------------------------
 
-T.has("notes Shift-only, Shift up: hint", T.show(HEROIC_STRIKE), "Hold Shift for additional info")
+T.has("notes Shift-only, Shift up: key", T.show(HEROIC_STRIKE), KEY)
 ns.db.notesShiftOnly = false
-T.has("notes always: shown without Shift, no hint", T.show(HEROIC_STRIKE), "Only the bonus damage counts", "Hold Shift")
+T.has("notes always: shown without Shift, no key", T.show(HEROIC_STRIKE), "Only the bonus damage counts", "shift:16:32")
 ns.db.notesShiftOnly, ns.db.notes = true, false
-T.has("notes off: no hint, no notes", T.show(HEROIC_STRIKE), "dmg/rage", "Hold Shift")
+T.has("notes off: no key, no notes", T.show(HEROIC_STRIKE), "dmg/rage", "shift:16:32")
 ns.db.notes = true
 
 ns.db.efficiencyShiftOnly = true
@@ -102,6 +110,6 @@ ns.db.dpsShiftOnly = true
 T.has("DPS Shift-only, Shift up: no DPS", T.show(FIREBALL), "1.5 sec cast", "dps")
 local link = T.show(HEROIC_STRIKE, nil, ItemRefTooltip)
 T.has("chat link, Shift up: Shift-only efficiency shown anyway", link, "dmg/rage")
-T.has("chat link, Shift up: notes, not the hint", link, "Only the bonus damage counts", "Hold Shift")
+T.has("chat link, Shift up: notes, not the key", link, "Only the bonus damage counts", "shift:16:32")
 
 T.finish()

@@ -848,8 +848,9 @@ end
 -- (RefreshForShift); cleared whenever the tooltip is.
 local shiftTooltip
 
--- Shown instead of the notes until Shift is held.
-local SHIFT_HINT = "Hold Shift for additional info"
+-- A <kbd>-style Shift keycap (shift.tga, made by scripts/Generate-ShiftKey.ps1), shown instead of
+-- the notes until Shift is held, after the DPS or efficiency suffix. 32x16, the texture's 2:1 shape.
+local SHIFT_KEY = " |TInterface\\AddOns\\" .. addonName .. "\\shift:16:32|t"
 
 local function AppendNotes(notes, more)
     for _, note in ipairs(more or {}) do
@@ -905,6 +906,7 @@ local function Process(tooltip, spellID)
     -- Only filled when a suffix is added, so a second pass bails on that suffix before reaching
     -- the note lines (IsAnnotated).
     local notes = {}
+    local keyLine -- where SHIFT_KEY goes: the line with the DPS suffix, else the efficiency suffix
     local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
     if lines then
         local titleLine = _G[name .. "TextLeft1"]
@@ -921,6 +923,7 @@ local function Process(tooltip, spellID)
                 if suffix then
                     costLine:SetText(costLine:GetText() .. suffix)
                     AppendNotes(notes, suffixNotes)
+                    keyLine = costLine
                     changed = true
                 end
             end
@@ -931,20 +934,22 @@ local function Process(tooltip, spellID)
             if suffix then
                 cast.line:SetText(cast.line:GetText() .. suffix)
                 AppendNotes(notes, suffixNotes)
+                keyLine = cast.line
                 changed = true
             end
         end
     end
 
     -- Notes explain calculations that aren't obvious (Heroic Strike's forgone rage). In Shift-only
-    -- mode a hint shows until Shift is held.
+    -- mode a Shift keycap shows after the last suffix until Shift is held; notes only exist when a
+    -- suffix was added, so keyLine is always set here.
     if ns.db.notes and #notes > 0 then
         if Shown("notes", tooltip) then
             for _, note in ipairs(notes) do
                 tooltip:AddLine(note, 0.8, 0.8, 0.8, true)
             end
         else
-            tooltip:AddLine(SHIFT_HINT, 0.5, 0.5, 0.5)
+            keyLine:SetText(keyLine:GetText() .. SHIFT_KEY)
         end
         changed = true
     end
