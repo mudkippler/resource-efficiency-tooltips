@@ -88,44 +88,52 @@ function CreateFrame(kind, name)
 end
 
 ---------------------------------------------------------------------------
--- Fake GameTooltip
+-- Fake GameTooltip and ItemRefTooltip
 ---------------------------------------------------------------------------
 
-local tipRows, tipScripts = {}, {}
-GameTooltip = {
-    GetName = function() return "GameTooltip" end,
-    NumLines = function() return #tipRows end,
-    IsShown = function() return true end,
-    Show = function() end,
-    SetAction = function() end,
-    GetOwner = function() return T.owner end,
-    HookScript = function(_, script, f) tipScripts[script] = f end,
-    AddLine = function(_, text)
-        tipRows[#tipRows + 1] = text
-        _G["GameTooltipTextLeft" .. #tipRows] = FontString(text)
-    end,
-}
+-- A fake named tooltip whose lines live in _G[name .. "TextLeftN"], like the real ones.
+local function MakeTooltip(name)
+    local tip = { rows = {}, scripts = {} }
+    tip.GetName = function() return name end
+    tip.NumLines = function() return #tip.rows end
+    tip.IsShown = function() return true end
+    tip.Show = function() end
+    tip.SetAction = function() end
+    tip.GetOwner = function() return T.owner end
+    tip.HookScript = function(_, script, f) tip.scripts[script] = f end
+    tip.AddLine = function(_, text)
+        tip.rows[#tip.rows + 1] = text
+        _G[name .. "TextLeft" .. #tip.rows] = FontString(text)
+    end
+    return tip
+end
+GameTooltip = MakeTooltip("GameTooltip")
+ItemRefTooltip = MakeTooltip("ItemRefTooltip") -- chat links
 
--- Replaces GameTooltip's lines like a real Set* call does (OnTooltipCleared first).
-function T.setTip(rows)
-    if tipScripts.OnTooltipCleared then tipScripts.OnTooltipCleared() end
-    tipRows = {}
-    for i, row in ipairs(rows) do tipRows[i] = row end
-    FillLines("GameTooltip", rows)
+-- Replaces a tooltip's lines (GameTooltip by default) like a real Set* call does, OnTooltipCleared first.
+function T.setTip(rows, tip)
+    tip = tip or GameTooltip
+    if tip.scripts.OnTooltipCleared then tip.scripts.OnTooltipCleared() end
+    tip.rows = {}
+    for i, row in ipairs(rows) do tip.rows[i] = row end
+    FillLines(tip:GetName(), rows)
 end
 
--- GameTooltip's left lines joined with " | ".
-function T.dump()
+-- A tooltip's left lines (GameTooltip by default) joined with " | ".
+function T.dump(tip)
+    tip = tip or GameTooltip
     local out = {}
-    for i = 1, #tipRows do out[i] = _G["GameTooltipTextLeft" .. i]:GetText() end
+    for i = 1, #tip.rows do out[i] = _G[tip:GetName() .. "TextLeft" .. i]:GetText() end
     return table.concat(out, " | ")
 end
 
--- Shows a spell in GameTooltip through the TooltipDataProcessor post-call and returns T.dump().
-function T.show(rows, spellID)
-    T.setTip(rows)
-    T.postCall(GameTooltip, { id = spellID })
-    return T.dump()
+-- Shows a spell in a tooltip (GameTooltip by default) through the TooltipDataProcessor post-call
+-- and returns T.dump().
+function T.show(rows, spellID, tip)
+    tip = tip or GameTooltip
+    T.setTip(rows, tip)
+    T.postCall(tip, { id = spellID })
+    return T.dump(tip)
 end
 
 -- A named tooltip for ns.ReadSpellTooltip, with left and right line texts.

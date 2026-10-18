@@ -59,14 +59,17 @@ local CONVERSION_PATTERNS = {
     "additional energy",
 }
 
+-- Name-keyed tables are the escape hatch for wording that's ambiguous. Keyed by SpellKey, so they
+-- cover every rank; they also match same-named NPC spells, but only when the wording matches too.
+
 -- Seconds between attacks for summons whose tooltip says "repeatedly attacks" without
--- giving an interval. Keyed by lowercase spell name.
+-- giving an interval. Keyed by SpellKey.
 local SHOT_INTERVALS = {
     ["searing totem"] = 2.4,
 }
 
 -- Abilities that empower the next melee swing but whose tooltip reads like an instant strike
--- ("weapon damage plus 5"). Keyed by lowercase spell name.
+-- ("weapon damage plus 5"). Keyed by SpellKey.
 local NEXT_SWING_SPELLS = {
     ["cleave"] = true,
 }
@@ -89,6 +92,14 @@ local function Normalize(text)
     -- Thousands separators: "1,234,567" -> "1234567"
     text = text:gsub("(%d),(%d%d%d)", "%1%2"):gsub("(%d),(%d%d%d)", "%1%2")
     return text:lower()
+end
+
+-- The key for name-keyed tables (SHOT_INTERVALS, NEXT_SWING_SPELLS): the lowercase name without
+-- any rank, so every rank of a spell shares one entry even if a title reads "Cleave (Rank 3)".
+local function SpellKey(name)
+    if not name then return nil end
+    local key = Normalize(name):gsub("%s*%(rank %d+%)%s*$", ""):gsub("%s+rank %d+%s*$", "")
+    return key
 end
 
 ---------------------------------------------------------------------------
@@ -429,7 +440,7 @@ local function IsOverTime(clause)
         or clause:find("per%s+sec") or clause:find("repeatedly")
 end
 
--- lines: normalized (lowercase) tooltip lines; spellName: lowercase spell name, if known;
+-- lines: normalized (lowercase) tooltip lines; spellName: SpellKey(name), if known;
 -- stats: GetCombatStats() for weapon-based abilities.
 -- Returns a table with:
 --   totals[kind], perTick[kind], aoe[kind]: everything one cast does;
@@ -666,9 +677,8 @@ local function StatsKey(stats)
     return format("%.1f|%.1f|%.1f|%.2f", stats.melee or 0, stats.ranged or 0, stats.ap or 0, stats.swingRage or 0)
 end
 
--- Returns the cost line suffix (or nil) and its notes.
-local function GetSuffix(lines, cost, resource, spellName)
-    local stats = GetCombatStats()
+-- Returns the cost line suffix (or nil) and its notes. stats: GetCombatStats(), read once per tooltip.
+local function GetSuffix(lines, cost, resource, spellName, stats)
     local key = format("ratio|%s|%s|%s|%s|%s", cost, resource.key, spellName or "", StatsKey(stats),
         table.concat(lines, "|"))
     local entry = Cached(key, function() return BuildSuffix(lines, cost, resource, spellName, stats) end)
@@ -676,8 +686,7 @@ local function GetSuffix(lines, cost, resource, spellName)
 end
 
 -- Returns the cast time line suffix, e.g. "  (52.3 dps)" (or nil), and its notes.
-local function GetDPSSuffix(lines, cast, resource, spellName)
-    local stats = GetCombatStats()
+local function GetDPSSuffix(lines, cast, resource, spellName, stats)
     local key = format("dps|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
         resource and resource.key or "", spellName or "", StatsKey(stats), table.concat(lines, "|"))
     local entry = Cached(key, function()
@@ -821,9 +830,11 @@ local DEFAULTS = {
 ns.db = {}
 for k, v in pairs(DEFAULTS) do ns.db[k] = v end
 
--- True if a part is on, and Shift is held when it's Shift-only.
-local function Shown(part)
-    return ns.db[part] and (not ns.db[part .. "ShiftOnly"] or IsShiftKeyDown())
+-- True if a part is on, and Shift is held when it's Shift-only. Only GameTooltip is redrawn when
+-- Shift changes, and Shift-clicking a chat link usually puts it in chat instead of opening it, so
+-- other tooltips (ItemRefTooltip) show Shift-only parts too.
+local function Shown(part, tooltip)
+    return ns.db[part] and (not ns.db[part .. "ShiftOnly"] or IsShiftKeyDown() or tooltip ~= GameTooltip)
 end
 
 local function AnyShiftOnly()
@@ -900,12 +911,13 @@ local function Process(tooltip, spellID)
         local spellName = titleLine and titleLine:GetText()
         if spellName and issecret(spellName) then spellName = nil end
         ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
-        spellName = spellName and Normalize(spellName)
+        spellName = SpellKey(spellName)
+        local stats = GetCombatStats()
 
-        if Shown("efficiency") and costLine then
+        if Shown("efficiency", tooltip) and costLine then
             cost = cost or GetCostFromAPI(spellID, resource)
             if cost and cost > 0 then
-                local suffix, suffixNotes = GetSuffix(lines, cost, resource, spellName)
+                local suffix, suffixNotes = GetSuffix(lines, cost, resource, spellName, stats)
                 if suffix then
                     costLine:SetText(costLine:GetText() .. suffix)
                     AppendNotes(notes, suffixNotes)
@@ -913,9 +925,9 @@ local function Process(tooltip, spellID)
                 end
             end
         end
-        if Shown("dps") and cast then
+        if Shown("dps", tooltip) and cast then
             if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
-            local suffix, suffixNotes = GetDPSSuffix(lines, cast, resource, spellName)
+            local suffix, suffixNotes = GetDPSSuffix(lines, cast, resource, spellName, stats)
             if suffix then
                 cast.line:SetText(cast.line:GetText() .. suffix)
                 AppendNotes(notes, suffixNotes)
@@ -925,10 +937,9 @@ local function Process(tooltip, spellID)
     end
 
     -- Notes explain calculations that aren't obvious (Heroic Strike's forgone rage). In Shift-only
-    -- mode GameTooltip shows a hint until Shift is held; ItemRefTooltip isn't redrawn on Shift, so
-    -- it always shows them.
+    -- mode a hint shows until Shift is held.
     if ns.db.notes and #notes > 0 then
-        if not ns.db.notesShiftOnly or IsShiftKeyDown() or tooltip ~= GameTooltip then
+        if Shown("notes", tooltip) then
             for _, note in ipairs(notes) do
                 tooltip:AddLine(note, 0.8, 0.8, 0.8, true)
             end
@@ -940,7 +951,7 @@ local function Process(tooltip, spellID)
 
     -- The coefficient gets its own line at the bottom, below everything else.
     local coefficients = ns.db.coefficients and FormatCoefficients(spellID)
-    if coefficients and Shown("coefficients") and not HasCoefficientLine(tooltip, name) then
+    if coefficients and Shown("coefficients", tooltip) and not HasCoefficientLine(tooltip, name) then
         tooltip:AddLine(format("%s |cffffffff%s|r", COEFFICIENT_PREFIX, coefficients), 0.5, 0.78, 1)
         changed = true
     end
@@ -1007,8 +1018,9 @@ if SUPPORTED_LOCALES[GetLocale()] then
     GameTooltip:HookScript("OnTooltipCleared", function() shiftTooltip = nil end)
 end
 
-ns.Analyze = Analyze
 ns.ComputeRatios = ComputeRatios
+ns.GetCombatStats = GetCombatStats
+ns.SpellKey = SpellKey
 ns.ComputeDPS = ComputeDPS
 ns.ReadSpellTooltip = ReadSpellTooltip
 ns.GetCostFromAPI = GetCostFromAPI

@@ -80,7 +80,8 @@ end
 local scanner
 
 -- Builds a report row for a spell, or nil if its efficiency can't be calculated.
-local function AnalyzeSpell(spell)
+-- stats: ns.GetCombatStats(), read once per refresh.
+local function AnalyzeSpell(spell, stats)
     if not scanner then
         scanner = CreateFrame("GameTooltip", "ResourceEfficiencyTooltipsScanner", nil, "GameTooltipTemplate")
     end
@@ -98,7 +99,7 @@ local function AnalyzeSpell(spell)
     cost = cost or ns.GetCostFromAPI(spell.id, resource)
     if not cost or cost <= 0 then return nil end
 
-    local ratios = ns.ComputeRatios(lines, cost, ns.Normalize(spell.name), nil, resource)
+    local ratios = ns.ComputeRatios(lines, cost, ns.SpellKey(spell.name), stats, resource)
     if #ratios == 0 then return nil end
 
     local row = { id = spell.id, name = spell.name, rank = rank, icon = spell.icon, cost = cost,
@@ -223,8 +224,9 @@ end
 
 local function Refresh()
     data = {}
+    local stats = ns.GetCombatStats()
     for _, spell in ipairs(GetSpellbookSpells()) do
-        local row = AnalyzeSpell(spell)
+        local row = AnalyzeSpell(spell, stats)
         if row then data[#data + 1] = row end
     end
     Render()

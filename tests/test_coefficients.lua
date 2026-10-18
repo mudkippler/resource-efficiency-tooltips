@@ -8,6 +8,10 @@ local FIREBALL = { "Fireball", "30 Mana", "1.5 sec cast", "Hurls a fiery ball th
 local function Show(spellID, rows) return T.show(rows or FIREBALL, spellID) end
 
 T.has("Shift-only, Shift up: no line", Show(133), "dmg/mana", "Coefficient:")
+-- A chat link (ItemRefTooltip) isn't redrawn when Shift changes, so Shift-only parts show anyway.
+local link = T.show(FIREBALL, 133, ItemRefTooltip)
+T.has("chat link, Shift up: coefficient shown anyway", link, "| Coefficient: |cffffffff42.9% Direct / 0% DoT|r")
+T.has("chat link: efficiency too", link, "dmg/mana")
 T.shift = true
 T.has("Shift-only, Shift down: last line", Show(133), "| Coefficient: |cffffffff42.9% Direct / 0% DoT|r")
 T.has("Pyroblast: Direct and DoT", Show(11366), "Coefficient: |cffffffff100% Direct / 15% DoT|r")

@@ -100,5 +100,8 @@ T.check("redrawn once", redraws, 1)
 T.owner, T.shift = nil, false
 ns.db.dpsShiftOnly = true
 T.has("DPS Shift-only, Shift up: no DPS", T.show(FIREBALL), "1.5 sec cast", "dps")
+local link = T.show(HEROIC_STRIKE, nil, ItemRefTooltip)
+T.has("chat link, Shift up: Shift-only efficiency shown anyway", link, "dmg/rage")
+T.has("chat link, Shift up: notes, not the hint", link, "Only the bonus damage counts", "Hold Shift")
 
 T.finish()

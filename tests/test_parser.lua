@@ -114,4 +114,19 @@ T.check("read: efficiency already added", Read({ "Frostbolt", "25 Mana  (0.76 dm
 T.check("read: DPS already added", Read({ "Frostbolt", "25 Mana", "1.5 sec cast  (12.7 dps)" }, {}), "none")
 T.check("read: \"instantly\" isn't a cast line", Read({ "Instant Poison", "Instantly coats your weapon." }, {}), "none")
 
+---------------------------------------------------------------------------
+-- Name-keyed special cases cover every rank
+---------------------------------------------------------------------------
+
+T.check("SpellKey: bare name", ns.SpellKey("Cleave"), "cleave")
+T.check("SpellKey: \"(Rank 3)\" in the title", ns.SpellKey("Cleave (Rank 3)"), "cleave")
+T.check("SpellKey: \"Rank 2\" in the title", ns.SpellKey("|cffffffffSearing Totem|r Rank 2"), "searing totem")
+T.check("SpellKey: a name ending in a number is left alone", ns.SpellKey("Test Spell 2"), "test spell 2")
+-- If the rank stopped the NEXT_SWING_SPELLS lookup, Cleave would count the whole weapon hit (105/20).
+local CLEAVE = "A sweeping attack that does your weapon damage plus 5 to the target and his nearest ally."
+for _, title in ipairs({ "Cleave", "Cleave (Rank 3)" }) do
+    T.has("Cleave stays next-swing with title \"" .. title .. "\"", T.show({ title, "20 Rage", "Instant", CLEAVE }),
+        "20 Rage  (|cffff90400.25 dmg/rage per target|r)")
+end
+
 T.finish()
