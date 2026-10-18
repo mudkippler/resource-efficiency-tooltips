@@ -5,7 +5,7 @@
 -- One suite:     lua5.1 tests/test_parser.lua
 
 -- Add new suites here.
-local SUITES = { "test_parser.lua", "test_coefficients.lua", "test_notes.lua", "test_macro.lua" }
+local SUITES = { "test_parser.lua", "test_coefficients.lua", "test_notes.lua", "test_macro.lua", "test_stat_values.lua" }
 
 local dir = arg[0]:match("^(.*)[/\\]") or "."
 local addon = dir .. "/../ResourceEfficiencyTooltips"

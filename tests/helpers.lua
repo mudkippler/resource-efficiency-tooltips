@@ -17,6 +17,8 @@ T.scans = 0            -- main-hand tooltip reads, to test the per-link cache
 T.owner = nil          -- GameTooltip:GetOwner(), e.g. { UpdateTooltip = function() ... end }
 T.actions = {}         -- action slot -> GetActionInfo() returns, e.g. { "macro", 7 }
 T.macroSpells = {}     -- macro index -> GetMacroSpell() returns
+T.maxMana = 12240      -- UnitPowerMax("player", mana)
+T.intellect = 300      -- UnitStat("player", 4): effective Intellect
 T.events = {}          -- events the addon's frame registered
 T.hooks = {}           -- hooksecurefunc(GameTooltip, name, f) -> T.hooks[name] = f
 -- T.onEvent, T.postCall: the addon's OnEvent handler and TooltipDataProcessor post-call
@@ -37,6 +39,8 @@ function UnitDamage() return 90, 110 end            -- melee average 100
 function UnitRangedDamage() return 3, 80, 120 end    -- ranged average 100
 function UnitAttackPower() return 1000, 0, 0 end
 function UnitClass() return T.class, T.class end
+function UnitPowerMax(_, powerType) assert(powerType == 0, "max mana asked for another power type"); return T.maxMana end
+function UnitStat(_, index) assert(index == 4, "only Intellect is stubbed"); return T.intellect - 20, T.intellect, 20, 0 end
 function IsShiftKeyDown() return T.shift end
 function GetInventoryItemLink() return T.weapon and T.weapon.link end
 function GetActionInfo(slot) return unpack(T.actions[slot] or {}) end

@@ -19,6 +19,10 @@ local TOOLTIPS = { GameTooltip = true, ItemRefTooltip = true }
 -- The colon is part of it so a description that uses the word isn't mistaken for our line.
 local COEFFICIENT_PREFIX = "Coefficient:"
 
+-- Colour of the stat values inserted into descriptions (AddStatValues). Only used there, so
+-- IsAnnotated can recognise a description we've already changed.
+local STAT_VALUE_COLOR = "ff6fc3ff"
+
 -- How each kind of part in SPELL_COEFFICIENTS is labelled when a spell shows several, and its
 -- order: direct parts before periodic ones. "weapon" isn't listed: weapon damage scales with the
 -- weapon, not spell power (Charge's 100%), so those parts aren't shown. Neither are kinds added
@@ -686,9 +690,10 @@ local function GetDPSSuffix(lines, cast, resource, spellName)
 end
 
 -- True if a line is one we added or already carries one of our suffixes ("dmg/rage", "52.3 dps",
--- "Coefficient: 42.9%").
+-- "Coefficient: 42.9%") or stat values ("5% (612) of your maximum mana").
 local function IsAnnotated(text)
     if text:find("%d dps") or text:find(COEFFICIENT_PREFIX, 1, true) then return true end
+    if text:find("|c" .. STAT_VALUE_COLOR .. " (", 1, true) then return true end
     for _, res in ipairs(RESOURCES) do
         for _, label in pairs(LABELS) do
             if text:find(label .. "/" .. res.key, 1, true) then return true end
@@ -841,6 +846,45 @@ local function AppendNotes(notes, more)
     end
 end
 
+local STAT_INTELLECT = 4 -- UnitStat index
+
+-- Description wordings that scale with a player stat, and the stat's current value: "spell damage
+-- equal to 5% of your maximum mana" (Arcane Wrath), "you gain 15% of your intellect as spell damage"
+-- (Arcane Blast). Patterns match the tooltip's own capitalisation.
+local STAT_SCALINGS = {
+    { pattern = "(%d+%.?%d*)%%( of your maximum [Mm]ana)",
+        read = function() return UnitPowerMax("player", POWER.Mana or 0) end },
+    { pattern = "(%d+%.?%d*)%%( of your [Ii]ntellect)",
+        read = function() local _, intellect = UnitStat("player", STAT_INTELLECT); return intellect end },
+}
+
+-- Inserts what each STAT_SCALINGS percentage is worth right now, after the percentage:
+-- "equal to 5% (612) of your maximum Mana". Returns true if a line changed. Runs after the tooltip
+-- was read, and IsAnnotated stops a second pass, so the inserted number is never parsed as damage.
+local function AddStatValues(tooltip, name)
+    local changed = false
+    for i = 2, tooltip:NumLines() do
+        local line = _G[name .. "TextLeft" .. i]
+        local text = line and line:GetText()
+        if text and not issecret(text) then
+            local new = text
+            for _, scaling in ipairs(STAT_SCALINGS) do
+                new = new:gsub(scaling.pattern, function(percent, rest)
+                    local ok, stat = pcall(scaling.read)
+                    if not (ok and type(stat) == "number" and stat > 0) then return nil end
+                    return format("%s%%|c%s (%d)|r%s", percent, STAT_VALUE_COLOR,
+                        math.floor(stat * ToNum(percent) / 100 + 0.5), rest)
+                end)
+            end
+            if new ~= text then
+                line:SetText(new)
+                changed = true
+            end
+        end
+    end
+    return changed
+end
+
 local function Process(tooltip, spellID)
     if not tooltip or (tooltip.IsForbidden and tooltip:IsForbidden()) then return end
     local name = tooltip:GetName()
@@ -902,6 +946,8 @@ local function Process(tooltip, spellID)
     end
 
     if tooltip == GameTooltip and (lines or coefficients) and AnyShiftOnly() then shiftTooltip = tooltip end
+
+    if AddStatValues(tooltip, name) then changed = true end
 
     if changed and tooltip:IsShown() then
         tooltip:Show() -- resize to fit the longer lines

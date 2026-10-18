@@ -12,6 +12,8 @@
 
 **Spell coefficients**: the share of your spell power a spell gains, on a line at the bottom of the tooltip, e.g. `Coefficient: 81.4%`. By default it only shows while you hold Shift, or you can have it always shown. Spells with several parts list each one, direct part first, e.g. Pyroblast's `100% Direct / 15% DoT`.
 
+**Shows what stat-scaled bonuses are worth.** When a spell's description scales with your stats, the current value is filled in: Arcane Wrath's "5% (612) of your maximum Mana" and Arcane Blast's "15% (45) of your Intellect". These bonuses aren't added to the efficiency or DPS numbers, which use the spell's listed damage.
+
 **Choose what you see.** Type `/ret config` to turn each part of the tooltip on or off (efficiency, DPS, coefficients and additional info) and to choose whether each one only shows while you hold Shift. By default coefficients and additional info need Shift, and the rest is always shown.
 
 **Works on macros.** Macros that use `#showtooltip` show the same numbers as the spell itself.
