@@ -46,6 +46,8 @@ Finishers (Eviscerate, Rip, Rupture…) are rated at 5 combo points.
 
 **Clear labels for special cases.** AoE abilities are marked _per target_, and effects with no fixed duration are marked _per tick_.
 
+**In combat.** The game hides some values during combat, such as your weapon damage, attack power and stats. Anything that needs one of them shows crossed swords in brackets instead, e.g. Shred's and Claw's efficiency, or Arcane Blast's "15% (⚔) of your Intellect", and the real number comes back after combat.
+
 **Doesn't guess.** Weapon imbues, Paladin seals, buffs that only change other damage or healing, and bonus damage from spare rage or energy are skipped, so you won't see misleading numbers.
 
 **Lightweight.** A few settings, saved per account, and nothing else.

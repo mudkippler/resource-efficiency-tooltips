@@ -21,6 +21,11 @@ T.maxMana = 12240      -- UnitPowerMax("player", mana)
 T.intellect = 300      -- UnitStat("player", 4): effective Intellect
 T.events = {}          -- events the addon's frame registered
 T.hooks = {}           -- hooksecurefunc(GameTooltip, name, f) -> T.hooks[name] = f
+T.secrets = {}         -- stubs that return T.SECRET, as in combat: "melee", "ranged", "ap", "maxMana",
+                       -- "intellect", "weapon" (the main hand's link)
+-- A secret value: issecretvalue() is true for it, and comparing it or doing arithmetic with it
+-- errors, like the real ones. Put it in tooltip rows to make that line's text secret.
+T.SECRET = setmetatable({}, { __tostring = function() return "<secret>" end })
 -- T.onEvent, T.postCall: the addon's OnEvent handler and TooltipDataProcessor post-call
 
 ---------------------------------------------------------------------------
@@ -34,15 +39,25 @@ WorldFrame = {}
 Enum = { TooltipDataType = { Spell = 1 } }
 TooltipDataProcessor = { AddTooltipPostCall = function(_, f) T.postCall = f end }
 
+local function Secret(name, ...)
+    if T.secrets[name] then return T.SECRET, T.SECRET, T.SECRET end
+    return ...
+end
+
+function issecretvalue(v) return rawequal(v, T.SECRET) end
 function GetLocale() return "enUS" end
-function UnitDamage() return 90, 110 end            -- melee average 100
-function UnitRangedDamage() return 3, 80, 120 end    -- ranged average 100
-function UnitAttackPower() return 1000, 0, 0 end
+function UnitDamage() return Secret("melee", 90, 110) end           -- melee average 100
+function UnitRangedDamage() if T.secrets.ranged then return 3, T.SECRET, T.SECRET end return 3, 80, 120 end -- ranged average 100
+function UnitAttackPower() return Secret("ap", 1000, 0, 0) end
 function UnitClass() return T.class, T.class end
-function UnitPowerMax(_, powerType) assert(powerType == 0, "max mana asked for another power type"); return T.maxMana end
-function UnitStat(_, index) assert(index == 4, "only Intellect is stubbed"); return T.intellect - 20, T.intellect, 20, 0 end
+function UnitPowerMax(_, powerType) assert(powerType == 0, "max mana asked for another power type"); return (Secret("maxMana", T.maxMana)) end
+function UnitStat(_, index)
+    assert(index == 4, "only Intellect is stubbed")
+    if T.secrets.intellect then return T.SECRET, T.SECRET, T.SECRET, T.SECRET end
+    return T.intellect - 20, T.intellect, 20, 0
+end
 function IsShiftKeyDown() return T.shift end
-function GetInventoryItemLink() return T.weapon and T.weapon.link end
+function GetInventoryItemLink() return T.weapon and (Secret("weapon", T.weapon.link)) end
 function GetActionInfo(slot) return unpack(T.actions[slot] or {}) end
 function GetMacroSpell(index) return unpack(T.macroSpells[index] or {}) end
 function hooksecurefunc(_, name, f) T.hooks[name] = f end
@@ -59,7 +74,7 @@ local function FillLines(name, rows)
     end
     for i, row in ipairs(rows) do
         local left, right = row, nil
-        if type(row) == "table" then left, right = row[1], row[2] end
+        if type(row) == "table" and not rawequal(row, T.SECRET) then left, right = row[1], row[2] end
         _G[name .. "TextLeft" .. i], _G[name .. "TextRight" .. i] = FontString(left), FontString(right)
     end
 end
@@ -123,7 +138,7 @@ end
 function T.dump(tip)
     tip = tip or GameTooltip
     local out = {}
-    for i = 1, #tip.rows do out[i] = _G[tip:GetName() .. "TextLeft" .. i]:GetText() end
+    for i = 1, #tip.rows do out[i] = tostring(_G[tip:GetName() .. "TextLeft" .. i]:GetText()) end
     return table.concat(out, " | ")
 end
 

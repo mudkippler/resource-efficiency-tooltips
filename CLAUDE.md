@@ -132,6 +132,7 @@ lua5.1 tests/test_parser.lua  # one suite
 | `test_notes.lua` | Forgone swing rage (Warrior, Bear Form), the Shift notes, Shift-only settings |
 | `test_macro.lua` | The `SetAction` hook for `#showtooltip` macros and their spell IDs |
 | `test_stat_values.lua` | Stat values inserted into descriptions (Arcane Wrath, Arcane Blast) |
+| `test_secrets.lua` | Secret values in combat: the crossed swords icon instead of numbers |
 
 These files are the catalogue of supported wordings and their expected numbers, so never fix a test by changing what it expects unless the user agreed to the new behaviour. Add a case for every new wording or fix, in the suite that covers it. A new suite has to be added to `SUITES` in `run.lua`.
 
@@ -141,9 +142,20 @@ These files are the catalogue of supported wordings and their expected numbers, 
 - **A fake GameTooltip:** `T.show(rows, spellID)` runs the TooltipDataProcessor post-call and returns the lines joined with ` | `.
 - **Tooltip helpers:** `T.fakeTip` for `ReadSpellTooltip`, and `T.loadAddon()`, which loads the main file and `SpellCoefficients.lua` into a fresh `ns`.
 - **Checks:** `T.check` (equal), `T.has` (contains / doesn't contain) and `T.finish`.
+- **Secret values:** `T.SECRET` (errors on comparison and arithmetic like a real one, and can be a tooltip row) and `T.secrets`, the stubs that return it (`melee`, `ranged`, `ap`, `maxMana`, `intellect`, `weapon`).
 - **State a suite can change between cases:** `T.shift`, `T.class`, `T.maxMana`, `T.intellect`, `T.weapon` (the main hand's tooltip lines), `T.owner`, `T.actions`, `T.macroSpells`. It can also read `T.events`, `T.hooks`, `T.onEvent` and `T.postCall`.
 
 When the addon starts calling a new WoW API at load or tooltip time, add a stub to `helpers.lua`. `Report.lua` and `Config.lua` need a real client, so they're only compiled. The tests can't cover in-game behaviour (real tooltips, real APIs, the windows), so changes there still need the user to test in game.
+
+## Secret values (combat)
+
+In combat the client can return **secret values**: stats (`UnitDamage`, `UnitAttackPower`, `UnitStat`, `UnitPowerMax`), API results (`GetSpellPowerCost`, `GetSpellBaseCooldown`, the main hand's link) and tooltip text. `issecretvalue` says which. Comparing a secret or doing arithmetic with it errors, so every value is checked first. Wherever a number can't be calculated because something it needs is secret, `SECRET_ICON` (the player frame's crossed swords, `UI-StateIcon`'s combat half) shows in brackets instead, the user's design. The value comes back on the next redraw after combat.
+
+- **Stats:** `GetCombatStats` puts the secret ones in `stats.secret` (`melee`, `ranged`, `ap`, `swingRage`) and leaves them out. `Analyze` sets `secret` when a weapon strike needed one (Shred, Claw, Bloodthirst), and `ComputeRatios`/`ComputeDPS` return `secret` instead of numbers; so does forgone rage with an unreadable weapon. A spell that doesn't need the secret stat is unaffected. `StatsKey` includes the flags, so a cached icon doesn't outlive combat. `ReadMainHand` doesn't cache a weapon it couldn't read because of a secret.
+- **Tooltip text:** `ReadSpellTooltip` returns `secret` when any line was secret (its amounts may be incomplete), and `Process` shows the icon on both suffixes. A secret right-hand line in the first 5 sets `cast.secret` (the cooldown), as does a secret `GetSpellBaseCooldown`, which only affects DPS. A secret API cost only affects efficiency.
+- **Stat values:** `AddStatValues` inserts the icon in the value's place: `15% (⚔) of your Intellect`.
+- Each suffix with the icon gets `SECRET_NOTE`, deduplicated by `AppendNotes`. `IsAnnotated` matches the icon, so a second pass bails.
+- `SECRET_ICON` is unconfirmed in Forever: if `Interface\CharacterFrame\UI-StateIcon` doesn't exist there, swap in a texture of our own.
 
 ## Known gaps
 
@@ -162,7 +174,7 @@ When the addon starts calling a new WoW API at load or tooltip time, add a stub 
 
 - Match the existing style: file-level section banners (`-----` / `-- Section`), a comment above each function giving its purpose and return values, and lowercase example wordings in comments.
 - Write for Forever's current API only (see "Target client"). Guard an API only when it's unconfirmed whether Forever has it, and never add a branch for an older client.
-- Treat tooltip text as possibly secret (`issecretvalue`), as `ReadSpellTooltip` and `Process` do.
+- Treat tooltip text, stats and API results as possibly secret (`issecretvalue`); see "Secret values" above. Never compare or do arithmetic on a value before checking it.
 - Chat messages start with the coloured addon name (`|cff80c8ffResource Efficiency Tooltips|r`).
 - Slash commands: `/ret` (help + settings), `/ret report`, `/ret config`, `/ret debug`, `/ret help`. A new command must also be added to the `help` output and to `DESCRIPTION.md`.
 - Never perform Git operations, always leave that to the user

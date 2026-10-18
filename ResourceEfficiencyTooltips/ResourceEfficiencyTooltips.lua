@@ -23,6 +23,13 @@ local COEFFICIENT_PREFIX = "Coefficient:"
 -- IsAnnotated can recognise a description we've already changed.
 local STAT_VALUE_COLOR = "ff6fc3ff"
 
+-- Shown in brackets wherever a number can't be calculated because something it depends on is a
+-- secret value, as stats and tooltip text can be in combat: the player frame's crossed swords
+-- (UI-StateIcon's combat half). Only used for that, so IsAnnotated can recognise it.
+local SECRET_ICON = "|TInterface\\CharacterFrame\\UI-StateIcon:0:0:0:0:64:64:32:64:0:31|t"
+local SECRET_SUFFIX = "  (" .. SECRET_ICON .. ")"
+local SECRET_NOTE = "Something this needs is hidden during combat, so it shows again after combat."
+
 -- How each kind of part in SPELL_COEFFICIENTS is labelled when a spell shows several, and its
 -- order: direct parts before periodic ones. "weapon" isn't listed: weapon damage scales with the
 -- weapon, not spell power (Charge's 100%), so those parts aren't shown. Neither are kinds added
@@ -149,16 +156,19 @@ end
 
 local GetPowerCost = (C_Spell and C_Spell.GetSpellPowerCost) or GetSpellPowerCost
 
+-- Returns the cost, or nil and true if it's a secret value (combat).
 local function GetCostFromAPI(spellID, res)
     if not (GetPowerCost and spellID and res) then return nil end
-    local ok, cost = pcall(function()
+    local ok, cost, secret = pcall(function()
         for _, entry in ipairs(GetPowerCost(spellID) or {}) do
+            if issecret(entry.type) or issecret(entry.name) or issecret(entry.cost) then return nil, true end
             if (entry.type == res.power or entry.name == res.name) and entry.cost and entry.cost > 0 then
                 return entry.cost
             end
         end
     end)
-    return ok and cost or nil
+    if not ok then return nil end
+    return cost, secret
 end
 
 -- Rage an auto attack generates in WoW Forever. A Warrior's main hand: base weapon speed x 3.46
@@ -172,9 +182,11 @@ local weaponCache = {} -- item link -> { speed, twoHand }, or false if the speed
 local itemScanner
 
 -- The main-hand weapon's base speed ("Speed 3.60", before haste, which UnitAttackSpeed includes) and
--- whether it's two-handed, read from its tooltip. Returns nil without a readable weapon.
+-- whether it's two-handed, read from its tooltip. Returns nil without a readable weapon, and true
+-- as well when that's because its link or tooltip text is secret (combat), which isn't cached.
 local function ReadMainHand()
     local link = GetInventoryItemLink("player", MAIN_HAND_SLOT)
+    if issecret(link) then return nil, true end
     if not link then return nil end
     local weapon = weaponCache[link]
     if weapon == nil then
@@ -182,58 +194,86 @@ local function ReadMainHand()
             or CreateFrame("GameTooltip", "ResourceEfficiencyTooltipsItemScanner", nil, "GameTooltipTemplate")
         itemScanner:SetOwner(WorldFrame, "ANCHOR_NONE")
         itemScanner:SetInventoryItem("player", MAIN_HAND_SLOT)
-        local speed, twoHand = nil, false
+        local speed, twoHand, secret = nil, false, false
         for i = 1, itemScanner:NumLines() do
             local left = _G["ResourceEfficiencyTooltipsItemScannerTextLeft" .. i]
             local right = _G["ResourceEfficiencyTooltipsItemScannerTextRight" .. i]
             local leftText = left and left:GetText()
             local rightText = right and right:IsShown() and right:GetText()
-            if leftText and not issecret(leftText) and leftText == "Two-Hand" then twoHand = true end
-            if rightText and not issecret(rightText) then
-                speed = speed or tonumber(rightText:match("^Speed (%d+%.?%d*)"))
+            if issecret(leftText) or issecret(rightText) then
+                secret = true
+            else
+                if leftText == "Two-Hand" then twoHand = true end
+                if rightText then speed = speed or tonumber(rightText:match("^Speed (%d+%.?%d*)")) end
             end
         end
         itemScanner:Hide()
+        if secret then return nil, true end
         weapon = speed and { speed = speed, twoHand = twoHand } or false
         weaponCache[link] = weapon
     end
     return weapon or nil
 end
 
+-- True if any of the values is a secret value.
+local function AnySecret(...)
+    for i = 1, select("#", ...) do
+        if issecret((select(i, ...))) then return true end
+    end
+    return false
+end
+
 -- Average weapon swing damage (including attack power) and attack power, used for abilities
 -- that deal weapon damage, and the rage an auto attack generates (swingRage), used for
--- next-swing abilities. These change with gear, buffs and forms.
-local function ReadCombatStats()
-    local stats = {}
+-- next-swing abilities. These change with gear, buffs and forms. Fills stats in place.
+-- stats.secret marks the ones that are secret values in combat ("melee", "ranged", "ap",
+-- "swingRage"); they're left out, and what needs them shows SECRET_ICON instead.
+local function ReadCombatStats(stats)
+    local secret = stats.secret
     local _, class = UnitClass("player")
     if class == "WARRIOR" then
         -- Its own pcall, so a failed tooltip read doesn't lose the other stats.
-        local ok, weapon = pcall(ReadMainHand)
+        local ok, weapon, weaponSecret = pcall(ReadMainHand)
         if ok and weapon then
             stats.swingSpeed, stats.twoHand = weapon.speed, weapon.twoHand
             stats.swingRage = weapon.speed * (weapon.twoHand and SWING_RAGE_TWO_HAND or SWING_RAGE_ONE_HAND)
+        elseif ok and weaponSecret then
+            secret.swingRage = true
         end
     elseif class == "DRUID" then
         stats.swingRage, stats.bearForm = BEAR_SWING_RAGE, true
     end
     if UnitDamage then
         local minDamage, maxDamage = UnitDamage("player")
-        if minDamage and maxDamage and maxDamage > 0 then stats.melee = (minDamage + maxDamage) / 2 end
+        if AnySecret(minDamage, maxDamage) then
+            secret.melee = true
+        elseif minDamage and maxDamage and maxDamage > 0 then
+            stats.melee = (minDamage + maxDamage) / 2
+        end
     end
     if UnitRangedDamage then
         local _, minDamage, maxDamage = UnitRangedDamage("player")
-        if minDamage and maxDamage and maxDamage > 0 then stats.ranged = (minDamage + maxDamage) / 2 end
+        if AnySecret(minDamage, maxDamage) then
+            secret.ranged = true
+        elseif minDamage and maxDamage and maxDamage > 0 then
+            stats.ranged = (minDamage + maxDamage) / 2
+        end
     end
     if UnitAttackPower then
         local base, pos, neg = UnitAttackPower("player")
-        if base then stats.ap = base + (pos or 0) + (neg or 0) end
+        if AnySecret(base, pos, neg) then
+            secret.ap = true
+        elseif base then
+            stats.ap = base + (pos or 0) + (neg or 0)
+        end
     end
-    return stats
 end
 
 local function GetCombatStats()
-    local ok, stats = pcall(ReadCombatStats)
-    return ok and stats or {}
+    local stats = { secret = {} }
+    -- Keeps what was read before an error.
+    pcall(ReadCombatStats, stats)
+    return stats
 end
 
 ---------------------------------------------------------------------------
@@ -454,7 +494,9 @@ end
 --   duration: seconds from "over N sec", "for N sec" or "lasts N sec" (a channel's length), or nil;
 --   nextSwing: true for abilities that empower the next melee swing (WeaponAmount);
 --   weaponSource: the stat an instant weapon strike used ("melee", "ranged" or "ap"), or nil;
---   conversion: true if a clause converting spare resource into damage was skipped.
+--   conversion: true if a clause converting spare resource into damage was skipped;
+--   secret: true if a weapon strike needed a stat that's a secret value (stats.secret), so its
+--     damage is missing and nothing should be calculated.
 local function Analyze(lines, spellName, stats)
     local totals, perTick, aoe, direct, directAoe, dots, dotUnknown = {}, {}, {}, {}, {}, {}, {}
     local result = { totals = totals, perTick = perTick, aoe = aoe, direct = direct, directAoe = directAoe,
@@ -514,6 +556,9 @@ local function Analyze(lines, spellName, stats)
                     kind = "damage"
                     result.nextSwing = result.nextSwing or isNextSwing
                     result.weaponSource = result.weaponSource or source
+                    if not weaponDamage and source and stats.secret and stats.secret[source] then
+                        result.secret = true
+                    end
                     if weaponDamage and weaponDamage > 0 then
                         add(weaponDamage, 1, false, false)
                     end
@@ -565,13 +610,20 @@ end
 
 -- Returns a list of { kind, ratio, perTick, aoe, comboPoints } in ORDER, empty if nothing could
 -- be calculated, with .notes: sentences explaining calculations that aren't obvious, shown while
--- Shift is held. stats defaults to the player's current GetCombatStats(); resource is the cost's
--- resource (RESOURCES entry), may be nil.
+-- Shift is held, and .secret: true (and an empty list) when a stat it needs is a secret value.
+-- stats defaults to the player's current GetCombatStats(); resource is the cost's resource
+-- (RESOURCES entry), may be nil.
 local function ComputeRatios(lines, cost, spellName, stats, resource)
     stats = stats or GetCombatStats()
     local a = Analyze(lines, spellName, stats)
     local ratios, notes = {}, {}
     ratios.notes = notes
+    local secret = stats.secret or {}
+    if a.secret or (a.nextSwing and resource and resource.key == "rage" and secret.swingRage) then
+        ratios.secret = true
+        notes[1] = SECRET_NOTE
+        return ratios
+    end
     -- An empowered swing (Heroic Strike, Cleave, Maul) generates no rage, so the rage it would have
     -- given is spent too.
     local forgoneRage = a.nextSwing and resource and resource.key == "rage" and stats.swingRage
@@ -637,12 +689,15 @@ end
 --   8 sec) is 120/3 + 80/8 = 50; a DoT shorter than the cast time lands in full every cast.
 -- Channels: everything they do over the channel.
 -- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
--- Returns { dps, aoe, notes } or nil (notes as in ComputeRatios).
+-- Returns { dps, aoe, notes } or nil (notes as in ComputeRatios), or { secret = true, notes } when
+-- the cooldown (cast.secret) or a stat it needs is a secret value.
 local DOT_DPS_SHARE = 0.45
 local function ComputeDPS(lines, cast, spellName, stats, resource)
-    if not cast or cast.kind == "nextswing" or (cast.cooldown and cast.cooldown > 0) then return nil end
+    if not cast or cast.kind == "nextswing" then return nil end
     local a = Analyze(lines, spellName, stats or GetCombatStats())
     if a.comboPoints then return nil end
+    if cast.secret or a.secret then return { secret = true, notes = { SECRET_NOTE } } end
+    if cast.cooldown and cast.cooldown > 0 then return nil end
     local gcd = GlobalCooldown(resource)
     if cast.kind == "channeled" then
         local damage, seconds = a.totals.damage, a.duration
@@ -685,6 +740,7 @@ end
 -- Returns { suffix, notes } for the cost line; suffix is nil when nothing could be calculated.
 local function BuildSuffix(lines, cost, resource, spellName, stats)
     local ratios = ComputeRatios(lines, cost, spellName, stats, resource)
+    if ratios.secret then return { suffix = SECRET_SUFFIX, notes = ratios.notes } end
     local parts = {}
     for _, r in ipairs(ratios) do
         parts[#parts + 1] = format("|c%s%s %s/%s%s%s%s|r", COLORS[r.kind], FormatRatio(r.ratio),
@@ -696,7 +752,10 @@ local function BuildSuffix(lines, cost, resource, spellName, stats)
 end
 
 local function StatsKey(stats)
-    return format("%.1f|%.1f|%.1f|%.2f", stats.melee or 0, stats.ranged or 0, stats.ap or 0, stats.swingRage or 0)
+    local secret = stats.secret or {}
+    return format("%.1f|%.1f|%.1f|%.2f|%s%s%s%s", stats.melee or 0, stats.ranged or 0, stats.ap or 0,
+        stats.swingRage or 0, secret.melee and "m" or "", secret.ranged and "r" or "", secret.ap and "a" or "",
+        secret.swingRage and "s" or "")
 end
 
 -- Returns the cost line suffix (or nil) and its notes. stats: GetCombatStats(), read once per tooltip.
@@ -709,11 +768,13 @@ end
 
 -- Returns the cast time line suffix, e.g. "  (52.3 dps)" (or nil), and its notes.
 local function GetDPSSuffix(lines, cast, resource, spellName, stats)
-    local key = format("dps|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
-        resource and resource.key or "", spellName or "", StatsKey(stats), table.concat(lines, "|"))
+    local key = format("dps|%s|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
+        cast.secret and "secret" or "", resource and resource.key or "", spellName or "", StatsKey(stats),
+        table.concat(lines, "|"))
     local entry = Cached(key, function()
         local r = ComputeDPS(lines, cast, spellName, stats, resource)
         if not r then return { notes = {} } end
+        if r.secret then return { suffix = SECRET_SUFFIX, notes = r.notes } end
         return { suffix = format("  (|c%s%s dps%s|r)", COLORS.damage, FormatRatio(r.dps),
             r.aoe and " per target" or ""), notes = r.notes }
     end)
@@ -721,9 +782,10 @@ local function GetDPSSuffix(lines, cast, resource, spellName, stats)
 end
 
 -- True if a line is one we added or already carries one of our suffixes ("dmg/rage", "52.3 dps",
--- "Coefficient: 42.9%") or stat values ("5% (612) of your maximum mana").
+-- "Coefficient: 42.9%", SECRET_ICON) or stat values ("5% (612) of your maximum mana").
 local function IsAnnotated(text)
     if text:find("%d dps") or text:find(COEFFICIENT_PREFIX, 1, true) then return true end
+    if text:find(SECRET_ICON, 1, true) then return true end
     if text:find("|c" .. STAT_VALUE_COLOR .. " (", 1, true) then return true end
     for _, res in ipairs(RESOURCES) do
         for _, label in pairs(LABELS) do
@@ -752,18 +814,24 @@ local function MatchCooldown(text)
 end
 
 -- Reads a named spell tooltip. Returns the cost font string, the resource, the cost (nil for
--- percentage costs), the normalized description lines and the cast info
--- { line = font string, kind, seconds, cooldown } (see MatchCast).
+-- percentage costs), the normalized description lines, the cast info
+-- { line = font string, kind, seconds, cooldown, secret } (see MatchCast) and whether any line was
+-- a secret value (combat), so the lines may be incomplete. cast.secret is true when a line that
+-- could hold the cooldown was secret.
 -- The cost values or cast are nil when the tooltip has no such line. Returns nothing if it has
 -- neither, or is already annotated.
 local function ReadSpellTooltip(tooltip)
     local name = tooltip:GetName()
     local costLine, resource, cost, cast, cooldown
+    local secret, cooldownSecret = false, false
     local lines = {}
     for i = 2, tooltip:NumLines() do
         local fontString = _G[name .. "TextLeft" .. i]
         local text = fontString and fontString:GetText()
-        if text and not issecret(text) then
+        if issecret(text) then
+            secret = true
+            if i <= 5 then cooldownSecret = true end
+        elseif text then
             if IsAnnotated(text) then return end
             local lower = Normalize(text)
             if lower:find("^next rank") then break end
@@ -775,7 +843,9 @@ local function ReadSpellTooltip(tooltip)
                 -- The range and cooldown sit to the right of the cost and cast lines.
                 local right = _G[name .. "TextRight" .. i]
                 local rightText = right and right:IsShown() and right:GetText()
-                if rightText and not issecret(rightText) then
+                if issecret(rightText) then
+                    cooldownSecret = true
+                elseif rightText then
                     cooldown = cooldown or MatchCooldown(Normalize(rightText))
                 end
             end
@@ -790,17 +860,19 @@ local function ReadSpellTooltip(tooltip)
             end
         end
     end
-    if cast then cast.cooldown = cooldown end
+    if cast then cast.cooldown, cast.secret = cooldown, (not cooldown and cooldownSecret) or nil end
     if not (costLine or cast) then return end
-    return costLine, resource, cost, lines, cast
+    return costLine, resource, cost, lines, cast, secret
 end
 
 local GetBaseCooldown = GetSpellBaseCooldown
 
--- Cooldown in seconds from the API, for cooldowns the tooltip text didn't show; nil if unknown.
+-- Cooldown in seconds from the API, for cooldowns the tooltip text didn't show; nil if unknown,
+-- or nil and true if it's a secret value (combat).
 local function GetCooldownFromAPI(spellID)
     if not (GetBaseCooldown and spellID) then return nil end
     local ok, ms = pcall(GetBaseCooldown, spellID)
+    if ok and issecret(ms) then return nil, true end
     return ok and type(ms) == "number" and ms / 1000 or nil
 end
 
@@ -885,9 +957,14 @@ local shiftTooltip
 -- the notes until Shift is held, after the DPS or efficiency suffix. 32x16, the texture's 2:1 shape.
 local SHIFT_KEY = " |TInterface\\AddOns\\" .. addonName .. "\\shift:16:32|t"
 
+-- Adds the notes in more that notes doesn't have yet (both suffixes can give SECRET_NOTE).
 local function AppendNotes(notes, more)
     for _, note in ipairs(more or {}) do
-        notes[#notes + 1] = note
+        local seen = false
+        for _, existing in ipairs(notes) do
+            if existing == note then seen = true end
+        end
+        if not seen then notes[#notes + 1] = note end
     end
 end
 
@@ -904,8 +981,9 @@ local STAT_SCALINGS = {
 }
 
 -- Inserts what each STAT_SCALINGS percentage is worth right now, after the percentage:
--- "equal to 5% (612) of your maximum Mana". Returns true if a line changed. Runs after the tooltip
--- was read, and IsAnnotated stops a second pass, so the inserted number is never parsed as damage.
+-- "equal to 5% (612) of your maximum Mana", or SECRET_ICON in the brackets while the stat is a
+-- secret value (combat). Returns true if a line changed. Runs after the tooltip was read, and
+-- IsAnnotated stops a second pass, so the inserted number is never parsed as damage.
 local function AddStatValues(tooltip, name)
     local changed = false
     for i = 2, tooltip:NumLines() do
@@ -916,6 +994,9 @@ local function AddStatValues(tooltip, name)
             for _, scaling in ipairs(STAT_SCALINGS) do
                 new = new:gsub(scaling.pattern, function(percent, rest)
                     local ok, stat = pcall(scaling.read)
+                    if ok and issecret(stat) then
+                        return format("%s%%|c%s (%s)|r%s", percent, STAT_VALUE_COLOR, SECRET_ICON, rest)
+                    end
                     if not (ok and type(stat) == "number" and stat > 0) then return nil end
                     return format("%s%%|c%s (%d)|r%s", percent, STAT_VALUE_COLOR,
                         math.floor(stat * ToNum(percent) / 100 + 0.5), rest)
@@ -940,30 +1021,41 @@ local function Process(tooltip, spellID)
     -- the note lines (IsAnnotated).
     local notes = {}
     local keyLine -- where SHIFT_KEY goes: the line with the DPS suffix, else the efficiency suffix
-    local costLine, resource, cost, lines, cast = ReadSpellTooltip(tooltip)
+    -- secretText: some tooltip text is a secret value (combat), so the amounts may be incomplete and
+    -- the suffixes show SECRET_ICON instead.
+    local costLine, resource, cost, lines, cast, secretText = ReadSpellTooltip(tooltip)
     if lines then
         local titleLine = _G[name .. "TextLeft1"]
         local spellName = titleLine and titleLine:GetText()
-        if spellName and issecret(spellName) then spellName = nil end
+        if issecret(spellName) then spellName, secretText = nil, true end
         ns.lastSpell = { name = spellName, id = spellID, lines = lines, cast = cast }
         spellName = SpellKey(spellName)
         local stats = GetCombatStats()
 
         if Shown("efficiency", tooltip) and costLine then
-            cost = cost or GetCostFromAPI(spellID, resource)
-            if cost and cost > 0 then
-                local suffix, suffixNotes = GetSuffix(lines, cost, resource, spellName, stats)
-                if suffix then
-                    costLine:SetText(costLine:GetText() .. suffix)
-                    AppendNotes(notes, suffixNotes)
-                    keyLine = costLine
-                    changed = true
-                end
+            local costSecret
+            if not cost then cost, costSecret = GetCostFromAPI(spellID, resource) end
+            local suffix, suffixNotes
+            if secretText or costSecret then
+                suffix, suffixNotes = SECRET_SUFFIX, { SECRET_NOTE }
+            elseif cost and cost > 0 then
+                suffix, suffixNotes = GetSuffix(lines, cost, resource, spellName, stats)
+            end
+            if suffix then
+                costLine:SetText(costLine:GetText() .. suffix)
+                AppendNotes(notes, suffixNotes)
+                keyLine = costLine
+                changed = true
             end
         end
         if Shown("dps", tooltip) and cast then
-            if not cast.cooldown then cast.cooldown = GetCooldownFromAPI(spellID) end
-            local suffix, suffixNotes = GetDPSSuffix(lines, cast, resource, spellName, stats)
+            if not (cast.cooldown or cast.secret) then cast.cooldown, cast.secret = GetCooldownFromAPI(spellID) end
+            local suffix, suffixNotes
+            if secretText and cast.kind ~= "nextswing" then
+                suffix, suffixNotes = SECRET_SUFFIX, { SECRET_NOTE }
+            else
+                suffix, suffixNotes = GetDPSSuffix(lines, cast, resource, spellName, stats)
+            end
             if suffix then
                 cast.line:SetText(cast.line:GetText() .. suffix)
                 AppendNotes(notes, suffixNotes)
