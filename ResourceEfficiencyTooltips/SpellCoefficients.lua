@@ -1,4 +1,4 @@
--- Generated 2026-10-17 22:54:48 -0400 from data/2026_10_17/spelldb.db by scripts/generate_spell_coefficients.py
+-- Generated 2026-11-03 09:32:56 -0500 from data/2026_11_03/spelldb.db by scripts/generate_spell_coefficients.py
 local _, ns = ...
 ns.SPELL_COEFFICIENTS = {
 [59]={{100,"damage"}},
@@ -1315,7 +1315,7 @@ ns.SPELL_COEFFICIENTS = {
 [454197]={{0,"damage"}},
 [454427]={{0,"heal"}},
 [456485]={{59.4,"heal"}},
-[456544]={{5,"damage"}},
+[456544]={{8,"damage"}},
 [458286]={{0,"heal"}},
 [458436]={{0,"dot"}},
 [458481]={{0,"dot"}},
@@ -1656,11 +1656,16 @@ ns.SPELL_COEFFICIENTS = {
 [1325757]={{0,"dot"}},
 [1325758]={{0,"dot"}},
 [1326047]={{71.4,"damage"}},
-[1326053]={{34.3,"damage"}},
-[1326054]={{34.3,"damage"}},
-[1326055]={{34.3,"damage"}},
+[1326053]={{27.1,"damage"}},
+[1326054]={{27.1,"damage"}},
+[1326055]={{27.1,"damage"}},
 [1326079]={{100,"damage"}},
 [1326080]={{100,"damage"}},
 [1326081]={{100,"damage"}},
 [1326082]={{100,"damage"}},
+[1328570]={{0,"heal"}},
+[1328616]={{0,"dot"}},
+[1328617]={{0,"dot"}},
+[1328618]={{100,"damage"}},
+[1328622]={{0,"heal"}},
 }

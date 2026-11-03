@@ -690,8 +690,9 @@ end
 --   8 sec) is 120/3 + 80/8 = 50; a DoT shorter than the cast time lands in full every cast.
 -- Channels: everything they do over the channel.
 -- cast: from ReadSpellTooltip; resource: the cost's resource (sets the GCD), may be nil.
--- Returns { dps, aoe, notes } or nil (notes as in ComputeRatios), or { secret = true, notes } when
--- the cooldown (cast.secret) or a stat it needs is a secret value.
+-- Returns { dps, aoe, dot, notes } or nil (notes as in ComputeRatios; dot is true when it's the DPS
+-- of the applied damage over time effect alone), or { secret = true, notes } when the cooldown
+-- (cast.secret) or a stat it needs is a secret value.
 local DOT_DPS_SHARE = 0.45
 local function ComputeDPS(lines, cast, spellName, stats, resource)
     if not cast or cast.kind == "nextswing" then return nil end
@@ -711,31 +712,30 @@ local function ComputeDPS(lines, cast, spellName, stats, resource)
     for _, dot in ipairs(dots) do dotTotal = dotTotal + dot.total end
     if dotTotal + direct <= 0 then return nil end
     local castTime = cast.seconds or 0
-    local dps, isAoE, notes = 0, false, {}
+    -- Casting it back to back, shown unless it's mostly damage over time, and in that note if it is.
+    local seconds = math.max(castTime, gcd)
+    local spamDPS, spamAoE = direct / seconds, a.directAoe.damage or false
+    for _, dot in ipairs(dots) do
+        spamDPS = spamDPS + dot.total / math.max(dot.duration, seconds)
+        spamAoE = spamAoE or dot.aoe
+    end
+    local notes = {}
     if dotTotal / (dotTotal + direct) > DOT_DPS_SHARE then
+        local dps, isAoE = 0, false
         for _, dot in ipairs(dots) do
             dps = dps + dot.total / (castTime + dot.duration)
             isAoE = isAoE or dot.aoe
         end
-        if direct > 0 then
-            notes[1] = "Most of the damage is over time, so DPS is that effect alone: its total over the cast "
-                .. "time plus its duration. The initial damage isn't counted."
-        elseif castTime > 0 then
-            notes[1] = "DPS is the damage over time effect's total over the cast time plus its duration."
-        end
-    else
-        local seconds = math.max(castTime, gcd)
-        dps, isAoE = direct / seconds, a.directAoe.damage or false
-        for _, dot in ipairs(dots) do
-            dps = dps + dot.total / math.max(dot.duration, seconds)
-            isAoE = isAoE or dot.aoe
-        end
-        if #dots > 0 then
-            notes[1] = "DPS counts damage over time at the rate it ticks while you keep recasting, because "
-                .. "recasting refreshes it rather than stacking it."
-        end
+        notes[1] = format("More than %d%% of this ability's damage comes from its periodic effect, so the "
+            .. "tooltip shows its DoT dps. Cast in rapid succession, it would do %s dps%s.",
+            DOT_DPS_SHARE * 100, FormatRatio(spamDPS), spamAoE and " per target" or "")
+        return { dps = dps, aoe = isAoE, dot = true, notes = notes }
     end
-    return { dps = dps, aoe = isAoE, notes = notes }
+    if #dots > 0 then
+        notes[1] = "DPS counts damage over time at the rate it ticks while you keep recasting, because "
+            .. "recasting refreshes it rather than stacking it."
+    end
+    return { dps = spamDPS, aoe = spamAoE, dot = false, notes = notes }
 end
 
 -- Returns { suffix, notes } for the cost line; suffix is nil when nothing could be calculated.
@@ -767,7 +767,8 @@ local function GetSuffix(lines, cost, resource, spellName, stats)
     return entry.suffix, entry.notes
 end
 
--- Returns the cast time line suffix, e.g. "  (52.3 dps)" (or nil), and its notes.
+-- Returns the cast time line suffix, e.g. "  (52.3 dps)" or Immolate's "  (1.2 DoT dps)" (or nil),
+-- and its notes.
 local function GetDPSSuffix(lines, cast, resource, spellName, stats)
     local key = format("dps|%s|%s|%s|%s|%s|%s|%s|%s", cast.kind, cast.seconds or "", cast.cooldown or 0,
         cast.secret and "secret" or "", resource and resource.key or "", spellName or "", StatsKey(stats),
@@ -776,16 +777,18 @@ local function GetDPSSuffix(lines, cast, resource, spellName, stats)
         local r = ComputeDPS(lines, cast, spellName, stats, resource)
         if not r then return { notes = {} } end
         if r.secret then return { suffix = SECRET_SUFFIX, notes = r.notes } end
-        return { suffix = format("  (|c%s%s dps%s|r)", COLORS.damage, FormatRatio(r.dps),
-            r.aoe and " per target" or ""), notes = r.notes }
+        return { suffix = format("  (|c%s%s %sdps%s|r)", COLORS.damage, FormatRatio(r.dps),
+            r.dot and "DoT " or "", r.aoe and " per target" or ""), notes = r.notes }
     end)
     return entry.suffix, entry.notes
 end
 
 -- True if a line is one we added or already carries one of our suffixes ("dmg/rage", "52.3 dps",
--- "Coefficient: 42.9%", SECRET_ICON) or stat values ("5% (612) of your maximum mana").
+-- "1.2 DoT dps", "Coefficient: 42.9%", SECRET_ICON) or stat values ("5% (612) of your maximum mana").
 local function IsAnnotated(text)
-    if text:find("%d dps") or text:find(COEFFICIENT_PREFIX, 1, true) then return true end
+    if text:find("%d dps") or text:find("%d DoT dps") or text:find(COEFFICIENT_PREFIX, 1, true) then
+        return true
+    end
     if text:find(SECRET_ICON, 1, true) then return true end
     if text:find("|c" .. STAT_VALUE_COLOR .. " (", 1, true) then return true end
     for _, res in ipairs(RESOURCES) do

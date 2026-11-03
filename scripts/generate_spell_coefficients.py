@@ -1,6 +1,6 @@
 """Regenerates ResourceEfficiencyTooltips/SpellCoefficients.lua from the spell database.
 
-Runs SELECT_RET_SPELL_DATA_AS_LUA.sql against spelldb.db (both in the same data/<date>/ folder,
+Runs scripts/sql/SELECT_RET_SPELL_DATA_AS_LUA.sql against a data/<date>/spelldb.db snapshot (the
 newest by default) and writes the rows into the Lua file under a header with the generation time.
 The database is opened read-only, so it's safe to run while a database browser has it open.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 OUTPUT = REPO / "ResourceEfficiencyTooltips" / "SpellCoefficients.lua"
 DB_NAME = "spelldb.db"
-SQL_NAME = "SELECT_RET_SPELL_DATA_AS_LUA.sql"
+SQL_PATH = REPO / "scripts" / "sql" / "SELECT_RET_SPELL_DATA_AS_LUA.sql"
 LUAC_FALLBACK = Path(r"C:\tools\lua51\luac5.1.exe")
 
 # Kept to the generation time only, since the file ships; the format is documented in the query.
@@ -48,11 +48,11 @@ def find_luac():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data", type=Path, help="data folder holding %s and %s (default: newest)" % (DB_NAME, SQL_NAME))
+    parser.add_argument("--data", type=Path, help="data folder holding %s (default: newest)" % DB_NAME)
     args = parser.parse_args()
 
     folder = (args.data if args.data.is_absolute() else Path.cwd() / args.data).resolve() if args.data else newest_data_folder()
-    db_path, sql_path = folder / DB_NAME, folder / SQL_NAME
+    db_path, sql_path = folder / DB_NAME, SQL_PATH
     for path in (db_path, sql_path):
         if not path.exists():
             sys.exit("Not found: %s" % path)

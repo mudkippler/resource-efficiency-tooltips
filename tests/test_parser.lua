@@ -53,12 +53,12 @@ end
 -- DPS
 ---------------------------------------------------------------------------
 
--- "12.667" or "22.667 aoe", or "nil" when no DPS is shown.
+-- "12.667", "22.667 aoe" or "1.176 dot" (the applied DoT's DPS), or "nil" when no DPS is shown.
 local function DPS(text, kind, seconds, cooldown, resourceKey, name)
     local r = ns.ComputeDPS({ ns.Normalize(text) }, { kind = kind, seconds = seconds, cooldown = cooldown },
         ns.Normalize(name), nil, T.resource(resourceKey))
     if not r then return "nil" end
-    return format("%.3f%s", r.dps, r.aoe and " aoe" or "")
+    return format("%.3f%s%s", r.dps, r.aoe and " aoe" or "", r.dot and " dot" or "")
 end
 
 local function n(value) return format("%.3f", value) end
@@ -68,19 +68,19 @@ local DPS_CASES = {
     { "Frostbolt 1.5 sec", "frostbolt", "Launches a bolt of frost at the enemy, causing 18 to 20 Frost damage and slowing movement speed by 40% for 5 sec.", "cast", 1.5, nil, "mana", n(19 / 1.5) },
     { "Arcane Blast 2.5 sec", "arcane blast", "Blasts the target with energy, dealing 364 to 424 Arcane damage. Effect stacks up to 3 times and lasts 8 sec.", "cast", 2.5, nil, "mana", n(394 / 2.5) },
     { "Fireball: small DoT, spam DPS", "fireball", "Hurls a fiery ball that causes 16 to 25 Fire damage and an additional 2 Fire damage over 4 sec.", "cast", 1.5, nil, "mana", n(20.5 / 1.5 + 2 / 4) },
-    { "Immolate: mostly DoT, DoT DPS", "immolate", "Burns the enemy for 11 Fire damage and then an additional 20 Fire damage over 15 sec.", "cast", 2, nil, "mana", n(20 / (2 + 15)) },
-    { "Corruption (DoT only)", "corruption", "Corrupts the target, causing 40 Shadow damage over 12 sec.", "instant", 0, nil, "mana", n(40 / 12) },
-    { "Corruption with a cast time", "corruption", "Corrupts the target, causing 40 Shadow damage over 12 sec.", "cast", 2, nil, "mana", n(40 / (2 + 12)) },
+    { "Immolate: mostly DoT, DoT DPS", "immolate", "Burns the enemy for 11 Fire damage and then an additional 20 Fire damage over 15 sec.", "cast", 2, nil, "mana", n(20 / (2 + 15)) .. " dot" },
+    { "Corruption (DoT only)", "corruption", "Corrupts the target, causing 40 Shadow damage over 12 sec.", "instant", 0, nil, "mana", n(40 / 12) .. " dot" },
+    { "Corruption with a cast time", "corruption", "Corrupts the target, causing 40 Shadow damage over 12 sec.", "cast", 2, nil, "mana", n(40 / (2 + 12)) .. " dot" },
     { "cast under the GCD", "smite", "Smites an enemy for 15 to 20 Holy damage.", "cast", 1.0, nil, "mana", n(17.5 / 1.5) },
     { "Arcane Explosion", "arcane explosion", "Causes an explosion of arcane magic around the caster, causing 32 to 36 Arcane damage to all enemies within 10 yards.", "instant", 0, nil, "mana", "22.667 aoe" },
     { "Flamestrike", "flamestrike", "Calls down a pillar of fire, burning all enemies within the area for 55 to 71 Fire damage and an additional 48 Fire damage over 8 sec.", "cast", 3, nil, "mana", "27.000 aoe" },
     { "Flamestrike, the user's example", "flamestrike", "Calls down a pillar of fire, burning all enemies within the area for 120 Fire damage and an additional 80 Fire damage over 8 sec.", "cast", 3, nil, "mana", "50.000 aoe" },
     { "short DoT lands in full", "test", "Burns the enemy for 10 Fire damage and an additional 6 Fire damage over 2 sec.", "cast", 3, nil, "mana", n(16 / 3) },
-    { "Rake: mostly DoT, DoT DPS", "rake", "Rake the target for 19 damage and an additional 39 damage over 9 sec.", "instant", 0, nil, "energy", n(39 / 9) },
-    { "Rend", "rend", "Wounds the target causing them to bleed for 15 damage over 9 sec.", "instant", 0, nil, "rage", n(15 / 9) },
-    { "ticking DoT", "test", "Burns the enemy for 10 Fire damage and then 5 Fire damage every 3 sec for 15 sec.", "cast", 2, nil, "mana", n(25 / (2 + 15)) },
+    { "Rake: mostly DoT, DoT DPS", "rake", "Rake the target for 19 damage and an additional 39 damage over 9 sec.", "instant", 0, nil, "energy", n(39 / 9) .. " dot" },
+    { "Rend", "rend", "Wounds the target causing them to bleed for 15 damage over 9 sec.", "instant", 0, nil, "rage", n(15 / 9) .. " dot" },
+    { "ticking DoT", "test", "Burns the enemy for 10 Fire damage and then 5 Fire damage every 3 sec for 15 sec.", "cast", 2, nil, "mana", n(25 / (2 + 15)) .. " dot" },
     { "45% DoT: spam DPS", "test", "Burns the enemy for 11 Fire damage and an additional 9 Fire damage over 9 sec.", "cast", 2, nil, "mana", n(11 / 2 + 9 / 9) },
-    { "46% DoT: DoT DPS", "test", "Burns the enemy for 54 Fire damage and an additional 46 Fire damage over 9 sec.", "cast", 2, nil, "mana", n(46 / (2 + 9)) },
+    { "46% DoT: DoT DPS", "test", "Burns the enemy for 54 Fire damage and an additional 46 Fire damage over 9 sec.", "cast", 2, nil, "mana", n(46 / (2 + 9)) .. " dot" },
     { "ticking DoT without a duration", "test", "Burns the enemy for 10 Fire damage and then 5 Fire damage every 3 sec.", "cast", 2, nil, "mana", "nil" },
     { "Sinister Strike with the energy GCD", "sinister strike", "An instant strike that causes 3 damage in addition to your normal weapon damage.", "instant", 0, nil, "energy", "103.000" },
     { "Hamstring", "hamstring", "Maims the enemy, causing 5 damage and slowing the enemy's movement by 50% for 15 sec.", "instant", 0, nil, "rage", n(5 / 1.5) },
@@ -91,7 +91,7 @@ local DPS_CASES = {
     { "Mind Flay channel", "mind flay", "Assault the target's mind with Shadow energy, causing 75 Shadow damage over 3 sec and slowing their movement speed by 50%.", "channeled", nil, nil, "mana", "25.000" },
     { "Blizzard channel AoE", "blizzard", "Ice shards pelt the target area doing 200 Frost damage over 8 sec.", "channeled", nil, nil, "mana", "25.000 aoe" },
     { "Lightning Shield charges", "lightning shield", "The caster is surrounded by 3 balls of lightning. When a spell, melee or ranged attack hits the caster, the attacker will be struck for 13 Nature damage. This expends one lightning ball. Lasts 10 min.", "instant", 0, nil, "mana", "nil" },
-    { "Searing Totem", "searing totem", "Summons a Searing Totem with 5 health at your feet for 30 sec that repeatedly attacks an enemy within 20 yards for 9 to 11 Fire damage.", "instant", 0, nil, "mana", n(130 / 30) },
+    { "Searing Totem", "searing totem", "Summons a Searing Totem with 5 health at your feet for 30 sec that repeatedly attacks an enemy within 20 yards for 9 to 11 Fire damage.", "instant", 0, nil, "mana", n(130 / 30) .. " dot" },
 }
 for _, case in ipairs(DPS_CASES) do
     T.check("dps: " .. case[1], DPS(case[3], case[4], case[5], case[6], case[7], case[2]), case[8])
@@ -115,6 +115,7 @@ T.check("read: next melee", Read({ "Heroic Strike", "15 Rage", "Next melee", "A 
 T.check("read: no cost, minute cooldown", Read({ "Shield Wall", "Instant", "Reduces damage taken." }, { nil, "30 min cooldown" }), "-|nil|instant|0|1800|1")
 T.check("read: efficiency already added", Read({ "Frostbolt", "25 Mana  (0.76 dmg/mana)", "1.5 sec cast" }, {}), "none")
 T.check("read: DPS already added", Read({ "Frostbolt", "25 Mana", "1.5 sec cast  (12.7 dps)" }, {}), "none")
+T.check("read: DoT DPS already added", Read({ "Immolate", "25 Mana", "2 sec cast  (1.2 DoT dps)" }, {}), "none")
 T.check("read: \"instantly\" isn't a cast line", Read({ "Instant Poison", "Instantly coats your weapon." }, {}), "none")
 
 ---------------------------------------------------------------------------

@@ -77,7 +77,12 @@ T.shift = false
 T.has("Frostbolt: no notes, no key", T.show({ "Frostbolt", "25 Mana", "1.5 sec cast", "Launches a bolt of frost, causing 18 to 20 Frost damage." }), nil, "shift:16:32")
 T.shift = true
 T.has("Fireball: DoT DPS note", T.show(FIREBALL), "DPS counts damage over time at the rate it ticks while you keep recasting")
-T.has("Immolate: mostly-DoT note", T.show({ "Immolate", "25 Mana", "2 sec cast", "Burns the enemy for 11 Fire damage and then an additional 20 Fire damage over 15 sec." }), "Most of the damage is over time, so DPS is that effect alone")
+local IMMOLATE = { "Immolate", "25 Mana", "2 sec cast", "Burns the enemy for 11 Fire damage and then an additional 20 Fire damage over 15 sec." }
+-- 11/2 + 20/15 = 6.83 cast back to back.
+T.has("Immolate: mostly-DoT note with the spam DPS", T.show(IMMOLATE), "More than 45% of this ability's damage comes from its periodic effect, so the tooltip shows its DoT dps. Cast in rapid succession, it would do 6.83 dps.")
+T.has("Corruption: the note for a pure DoT too", T.show({ "Corruption", "35 Mana", "Instant", "Corrupts the target, causing 40 Shadow damage over 12 sec." }), "Cast in rapid succession, it would do 3.33 dps.")
+T.has("Immolate: labelled DoT dps", T.show(IMMOLATE), "2 sec cast  (|cffff90401.18 DoT dps|r)")
+T.has("Fireball: plain dps", T.show(FIREBALL), "1.5 sec cast  (|cffff904014.2 dps|r)")
 T.has("Mortal Strike: weapon note", T.show({ "Mortal Strike", "30 Rage", "Instant", "A vicious strike that deals weapon damage plus 85." }), "Uses your current main-hand weapon damage (100 average).")
 T.has("Bloodthirst: attack power note", T.show({ "Bloodthirst", "30 Rage", "Instant", "Instantly attack the target causing damage equal to 45% of your attack power." }), "Uses your current attack power (1000).")
 T.has("Execute: conversion note", T.show({ "Execute", "15 Rage", "Instant", "Attempt to finish off a wounded foe, causing 125 damage and converting each extra point of rage into 3 additional damage." }), "Extra damage from spending more than the cost isn't counted.")
